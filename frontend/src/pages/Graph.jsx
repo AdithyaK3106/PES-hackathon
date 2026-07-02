@@ -1,75 +1,65 @@
-import { useMemo, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
-import { useWebSocket } from '../hooks/useWebSocket';
+import React, { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useDataStore } from '../hooks/useDataStore';
 import GraphModule from '../modules/GraphModule';
 import ErrorBoundary from '../components/ErrorBoundary';
+import { AlertTriangle, ArrowLeft } from 'lucide-react';
 
-const Graph = () => {
+export default function Graph() {
   const { caseId } = useParams();
-  const { cases, actions, connectionStatus } = useWebSocket();
+  const navigate = useNavigate();
+  const { fetchInvestigation } = useDataStore();
 
-  const selectedCase = useMemo(
-    () => cases.find((c) => c.case_id === caseId) || null,
-    [caseId, cases]
-  );
+  const [caseDetails, setCaseDetails] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const handleAction = useCallback(async (type, payload) => {
-    const endpointByType = {
-      freeze: '/action/freeze',
-      flag: '/action/flag',
-      alert: '/action/alert',
-      monitor: '/action/monitor',
-      close: '/action/close',
-      close_fp: '/action/close_fp'
-    };
-    const endpoint = endpointByType[type];
-    if (!endpoint) return;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
-    
-    const actionPayload = {
-      case_id: caseId,
-      account_id: payload?.accountId || payload?.target || 'GLOBAL',
-      ...payload
-    };
-    
-    let res;
-    try {
-      const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
-      res = await fetch(`${API_BASE}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(actionPayload),
-        signal: controller.signal
-      });
-    } finally {
-      clearTimeout(timeoutId);
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await fetchInvestigation(caseId);
+        setCaseDetails(data);
+      } catch (err) {
+        setError(err.message || 'Failed to load case graph details.');
+      } finally {
+        setLoading(false);
+      }
     }
-    if (!res.ok) {
-      throw new Error(`Action failed with status ${res.status}`);
-    }
+    load();
   }, [caseId]);
 
-  if (cases.length === 0 && connectionStatus === 'LIVE') {
-    return <div className="p-6 text-sm text-muted-foreground">Loading case graph...</div>;
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[80vh] text-slate-400">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-500 mb-4"></div>
+        <p className="text-xs font-semibold">Reconstructing Money Flow Graph Topology...</p>
+      </div>
+    );
   }
 
-  if (connectionStatus === 'OFFLINE' && !selectedCase) {
-    return <div className="p-6 text-sm text-red-500">Graph unavailable while offline.</div>;
+  if (error) {
+    return (
+      <div className="p-8 max-w-4xl mx-auto">
+        <div className="bg-red-950/30 border border-red-900/50 rounded-2xl p-6 text-center">
+          <AlertTriangle className="text-red-500 mx-auto mb-4" size={40} />
+          <h3 className="text-xl font-bold text-red-200">Failed to Load Graph</h3>
+          <p className="text-slate-400 mt-2 text-sm">{error}</p>
+          <button 
+            onClick={() => navigate('/investigations')}
+            className="mt-6 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2 px-4 rounded-lg text-sm transition-all flex items-center gap-2 mx-auto"
+          >
+            <ArrowLeft size={14} /> Back to Investigations
+          </button>
+        </div>
+      </div>
+    );
   }
-
-  if (!selectedCase) return null;
 
   return (
     <ErrorBoundary>
-      <GraphModule
-        caseData={selectedCase}
-        actions={actions}
-        onAction={handleAction}
-        connectionStatus={connectionStatus}
-      />
+      <GraphModule key={caseId} caseDetails={caseDetails} />
     </ErrorBoundary>
   );
-};
-
-export default Graph;
+}

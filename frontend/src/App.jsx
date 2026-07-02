@@ -1,22 +1,201 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
-import { useWebSocket } from './hooks/useWebSocket';
+import React, { useState, useEffect, useRef } from 'react';
+import { BrowserRouter as Router, Routes, Route, Link, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { useDataStore } from './hooks/useDataStore';
 
 // Pages
 import Feed from './pages/Feed';
 import Dashboard from './pages/Dashboard';
 import Cases from './pages/Cases';
 import Graph from './pages/Graph';
+import Upload from './pages/Upload';
+import Report from './pages/Report';
 
-import SystemStatusBar from './components/SystemStatusBar';
-import AttackModeToggle from './components/AttackModeToggle';
-import LiveAlertToast from './components/LiveAlertToast';
 import ErrorBoundary from './components/ErrorBoundary';
 import Login from './components/Login';
 import { getRole } from './roleStore';
+import { 
+  UploadCloud, LayoutDashboard, FileText, Search, 
+  ShieldAlert, LogOut, GitBranch, ArrowRight, User
+} from 'lucide-react';
 
-const App = () => {
-  const { connectionStatus } = useWebSocket();
+const NavigationSidebar = ({ handleLogout, role }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { searchEntities } = useDataStore();
+  
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const dropdownRef = useRef(null);
+
+  // Handle typing search
+  useEffect(() => {
+    const delayDebounce = setTimeout(async () => {
+      if (searchQuery.trim().length >= 2) {
+        let results = await searchEntities(searchQuery);
+        const match = location.pathname.match(/^\/graph\/([^/]+)/);
+        if (match) {
+          const currentCaseId = match[1];
+          results = results.filter(res => res.case_id === currentCaseId);
+        }
+        setSearchResults(results);
+        setShowSearchDropdown(true);
+      } else {
+        setSearchResults([]);
+        setShowSearchDropdown(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(delayDebounce);
+  }, [searchQuery, location.pathname]);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setShowSearchDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleSearchResultClick = (caseId) => {
+    setSearchQuery('');
+    setShowSearchDropdown(false);
+    navigate(`/graph/${caseId}`);
+  };
+
+  const getActiveCls = (path) => {
+    return location.pathname === path 
+      ? 'bg-indigo-600 text-white shadow-md' 
+      : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200';
+  };
+
+  const graphMatch = location.pathname.match(/^\/graph\/([^/]+)/);
+  const activeCaseId = graphMatch ? graphMatch[1] : null;
+
+  return (
+    <aside className="w-72 border-r border-slate-900 bg-slate-950 flex flex-col shrink-0">
+      
+      {/* Branding Header */}
+      <div className="p-6 border-b border-slate-900 space-y-3">
+        <div className="flex items-center gap-2">
+          <div className="h-8 w-8 bg-indigo-600 rounded-lg flex items-center justify-center font-black italic text-white text-lg tracking-tighter">
+            S
+          </div>
+          <div>
+            <h2 className="text-lg font-black tracking-tight text-white leading-none">SENTINEL</h2>
+            <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider mt-1 block">
+              FIU Workstation
+            </span>
+          </div>
+        </div>
+        
+        <div className="flex items-center justify-between bg-slate-900 border border-slate-850 px-3 py-1.5 rounded-lg">
+          <span className="text-[9px] font-black uppercase text-indigo-400">Analyst Mode</span>
+          <span className="text-[9px] font-mono font-bold text-slate-400">{role.toUpperCase()}</span>
+        </div>
+      </div>
+
+      {/* Global Search Bar */}
+      <div className="p-4 border-b border-slate-900 relative" ref={dropdownRef}>
+        <span className="text-[9px] text-slate-500 uppercase font-black tracking-wider block mb-1.5 pl-1">
+          {activeCaseId ? `Forensic Search (${activeCaseId})` : "Forensic Global Search"}
+        </span>
+        <div className="relative">
+          <Search className="absolute left-3 top-2.5 text-slate-500" size={14} />
+          <input
+            type="text"
+            placeholder={activeCaseId ? "Search in this case..." : "Search name, UPI, IFSC..."}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onFocus={() => searchQuery.length >= 2 && setShowSearchDropdown(true)}
+            className="w-full bg-slate-900 border border-slate-850 rounded-lg pl-9 pr-4 py-2 text-xs font-semibold text-slate-200 outline-none focus:border-slate-700 transition-colors placeholder-slate-600"
+          />
+        </div>
+
+        {/* Real-time search dropdown overlay */}
+        {showSearchDropdown && (
+          <div className="absolute left-4 right-4 mt-1 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 max-h-60 overflow-y-auto divide-y divide-slate-850">
+            {searchResults.length > 0 ? (
+              searchResults.map((res, i) => (
+                <div 
+                  key={i} 
+                  onClick={() => handleSearchResultClick(res.case_id)}
+                  className="p-3 hover:bg-slate-850 cursor-pointer transition-all space-y-1"
+                >
+                  <div className="flex justify-between items-center">
+                    <span className="text-[9px] text-indigo-400 font-black uppercase tracking-wider font-mono">
+                      {res.type}
+                    </span>
+                    <span className="text-[9px] bg-slate-950 px-1.5 py-0.5 rounded font-mono text-slate-400">
+                      {res.case_id}
+                    </span>
+                  </div>
+                  <p className="text-xs font-semibold text-slate-200 truncate">{res.value}</p>
+                  <p className="text-[9px] text-slate-500">{res.context}</p>
+                </div>
+              ))
+            ) : (
+              <div className="p-4 text-center text-xs text-slate-500 italic">
+                No matching records.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      
+      {/* Navigation Links */}
+      <nav className="flex-1 px-3 py-4 space-y-1.5">
+        <Link 
+          to="/upload" 
+          className={`flex items-center gap-3 px-4 py-2.5 rounded-lg text-xs font-bold transition-all ${getActiveCls('/upload')}`}
+        >
+          <UploadCloud size={16} />
+          Upload Statement
+        </Link>
+        <Link 
+          to="/dashboard" 
+          className={`flex items-center gap-3 px-4 py-2.5 rounded-lg text-xs font-bold transition-all ${getActiveCls('/dashboard')}`}
+        >
+          <LayoutDashboard size={16} />
+          Dashboard
+        </Link>
+        <Link 
+          to="/transactions" 
+          className={`flex items-center gap-3 px-4 py-2.5 rounded-lg text-xs font-bold transition-all ${getActiveCls('/transactions')}`}
+        >
+          <FileText size={16} />
+          Transactions
+        </Link>
+        <Link 
+          to="/investigations" 
+          className={`flex items-center gap-3 px-4 py-2.5 rounded-lg text-xs font-bold transition-all ${getActiveCls('/investigations')}`}
+        >
+          <ShieldAlert size={16} />
+          Investigations
+        </Link>
+      </nav>
+
+      {/* Logout & Footer */}
+      <div className="p-4 border-t border-slate-900 space-y-4">
+        <button 
+          onClick={handleLogout}
+          className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-slate-900 hover:bg-slate-850 border border-slate-800 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-200 transition-all"
+        >
+          <LogOut size={12} />
+          Logout Workstation
+        </button>
+        <div className="text-[9px] text-slate-600 uppercase font-black tracking-widest text-center">
+          SENTINEL v2.0
+        </div>
+      </div>
+    </aside>
+  );
+};
+
+const AppContent = () => {
   const role = getRole();
 
   if (!role) {
@@ -29,49 +208,29 @@ const App = () => {
   };
 
   return (
+    <div className="flex min-h-screen bg-slate-950 text-slate-100 relative">
+      <NavigationSidebar handleLogout={handleLogout} role={role} />
+      
+      {/* Main Content Area */}
+      <main className="flex-1 overflow-auto">
+        <Routes>
+          <Route path="/" element={<Navigate to="/upload" replace />} />
+          <Route path="/upload" element={<ErrorBoundary><Upload /></ErrorBoundary>} />
+          <Route path="/dashboard" element={<ErrorBoundary><Dashboard /></ErrorBoundary>} />
+          <Route path="/transactions" element={<ErrorBoundary><Feed /></ErrorBoundary>} />
+          <Route path="/investigations" element={<ErrorBoundary><Cases /></ErrorBoundary>} />
+          <Route path="/graph/:caseId" element={<ErrorBoundary><Graph /></ErrorBoundary>} />
+          <Route path="/report/:caseId" element={<ErrorBoundary><Report /></ErrorBoundary>} />
+        </Routes>
+      </main>
+    </div>
+  );
+};
+
+const App = () => {
+  return (
     <Router>
-      <div className="flex min-h-screen bg-background text-foreground relative">
-        <LiveAlertToast />
-        
-        {/* Navigation Sidebar */}
-        <aside className="w-72 border-r border-border bg-card/50 flex flex-col">
-          <div className="p-6 space-y-4">
-            <h2 className="text-xl font-bold tracking-tighter text-primary">SENTINEL</h2>
-            <div className="px-3 py-1 rounded-full bg-primary/10 border border-primary/20 inline-block">
-              <span className="text-[10px] font-black uppercase text-primary">Role: {role.toUpperCase()}</span>
-            </div>
-            <SystemStatusBar status={connectionStatus} />
-            <AttackModeToggle />
-          </div>
-          
-          <nav className="flex-1 px-4 space-y-2">
-            <Link to="/feed" className="block px-4 py-2 rounded-lg hover:bg-muted text-sm font-medium transition-colors">Real-time Feed</Link>
-            <Link to="/dashboard" className="block px-4 py-2 rounded-lg hover:bg-muted text-sm font-medium transition-colors">Analytics</Link>
-            <Link to="/cases" className="block px-4 py-2 rounded-lg hover:bg-muted text-sm font-medium transition-colors">Cases</Link>
-          </nav>
-
-          <div className="p-4 border-t border-border space-y-4">
-            <button 
-              onClick={handleLogout}
-              className="w-full py-2 rounded-lg bg-muted hover:bg-muted/80 text-[10px] font-black uppercase tracking-widest transition-all"
-            >
-              Logout System
-            </button>
-            <div className="text-[10px] text-muted-foreground uppercase font-semibold text-center opacity-50">Phase 0 Foundational</div>
-          </div>
-        </aside>
-
-        {/* Main Content Area */}
-        <main className="flex-1 overflow-auto">
-          <Routes>
-            <Route path="/" element={<Navigate to="/feed" replace />} />
-            <Route path="/feed" element={<Feed />} />
-            <Route path="/dashboard" element={<ErrorBoundary><Dashboard /></ErrorBoundary>} />
-            <Route path="/cases" element={<Cases />} />
-            <Route path="/graph/:caseId" element={<ErrorBoundary><Graph /></ErrorBoundary>} />
-          </Routes>
-        </main>
-      </div>
+      <AppContent />
     </Router>
   );
 };

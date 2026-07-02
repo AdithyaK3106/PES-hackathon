@@ -6,9 +6,9 @@ import { maskAccount } from '../../utils/maskAccount';
 
 const formatTransactionLabel = (edge) => {
   const amount = Number(edge.amount || 0);
-  const time = edge.time || edge.timestamp || '';
+  const channel = edge.channel || 'OTHER';
   const formattedAmount = new Intl.NumberFormat('en-IN').format(amount);
-  return time ? `\u20B9${formattedAmount} \u00B7 ${time}` : `\u20B9${formattedAmount}`;
+  return `\u20B9${formattedAmount} via ${channel}`;
 };
 
 const getGraphBounds = (container) => {
@@ -25,8 +25,8 @@ const getNodeDepths = (nodes, edges) => {
   const children = new Map(ids.map((id) => [id, []]));
 
   edges.forEach((edge) => {
-    const source = String(edge.source);
-    const target = String(edge.target);
+    const source = String(edge.source || edge.from);
+    const target = String(edge.target || edge.to);
     if (!indegree.has(source) || !indegree.has(target)) return;
     indegree.set(target, indegree.get(target) + 1);
     children.get(source).push(target);
@@ -103,7 +103,7 @@ const applyDashboardLayout = (cy, nodes, edges, container, animate) => {
   const columns = new Map();
 
   nodes.forEach((node) => {
-    const id = String(node.accountId || node.id);
+    const id = String(node.accountId || node.id || node.account_id);
     const depth = depths.get(id) || 0;
     if (!columns.has(depth)) columns.set(depth, []);
     columns.get(depth).push(id);
@@ -129,18 +129,24 @@ const applyDashboardLayout = (cy, nodes, edges, container, animate) => {
   });
 };
 
-/**
- * GraphCanvas (Phase 5 - Live)
- *
- * Dynamically adds new nodes and edges as they arrive from the backend.
- * Synchronizes status changes for existing nodes.
- */
 const layoutConfig = {
-  name: 'breadthfirst',
-  directed: true,
-  spacingFactor: 1.8,
+  name: 'cose',
+  idealEdgeLength: 120,
+  nodeOverlap: 20,
+  refresh: 20,
+  fit: true,
   padding: 50,
-  avoidOverlap: true
+  randomize: true,
+  componentSpacing: 100,
+  nodeRepulsion: 400000,
+  edgeElasticity: 100,
+  nestingFactor: 5,
+  gravity: 80,
+  numIter: 1000,
+  initialTemp: 200,
+  coolingFactor: 0.95,
+  minTemp: 1.0,
+  animate: true
 };
 
 const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) => {
@@ -160,7 +166,7 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
       const node = cy.getElementById(nodeId);
       if (node.length > 0) {
         node.animate({
-          style: { 'border-width': 10, 'border-color': '#fbbf24' }
+          style: { 'border-width': 10, 'border-color': '#3b82f6' }
         }, {
           duration: 200,
           complete: () => {
@@ -168,17 +174,67 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
               node.animate({
                 style: {
                   'border-width': 2,
-                  'border-color': node.data('status') === 'frozen' ? '#6B7280' : '#1D4ED8'
+                  'border-color': '#1d4ed8'
                 }
               }, { duration: 400 });
             }, duration);
           }
         });
       }
+    },
+    traceMoneyFlow: (nodeId) => {
+      const cy = cyRef.current;
+      if (!cy) return;
+      cy.elements().removeClass('highlighted');
+      if (!nodeId) return;
+      const root = cy.getElementById(nodeId);
+      if (root.length === 0) return;
+      
+      cy.elements().bfs({
+        roots: root,
+        visit: (v, e) => {
+          v.addClass('highlighted');
+          if (e) e.addClass('highlighted');
+        },
+        directed: true
+      });
+    },
+    expandNetwork: (nodeId) => {
+      const cy = cyRef.current;
+      if (!cy) return;
+      cy.elements().removeClass('highlighted');
+      if (!nodeId) return;
+      const root = cy.getElementById(nodeId);
+      if (root.length === 0) return;
+      
+      root.addClass('highlighted');
+      const neighbors1 = root.neighborhood();
+      neighbors1.addClass('highlighted');
+      
+      neighbors1.nodes().forEach(n => {
+        n.neighborhood().addClass('highlighted');
+      });
+    },
+    highlightSuspicious: (riskThreshold = 60) => {
+      const cy = cyRef.current;
+      if (!cy) return;
+      cy.elements().removeClass('suspicious-flag');
+      cy.nodes().forEach(n => {
+        const risk = Number(n.data('risk') || 0);
+        if (risk >= riskThreshold) {
+          n.addClass('suspicious-flag');
+          n.connectedEdges().addClass('suspicious-flag');
+        }
+      });
+    },
+    clearHighlights: () => {
+      const cy = cyRef.current;
+      if (!cy) return;
+      cy.elements().removeClass('highlighted').removeClass('suspicious-flag');
     }
   }));
 
-  // 1. Cytoscape setup: create the engine once and keep it alive across data updates.
+  // 1. Cytoscape setup
   useEffect(() => {
     if (!containerRef.current || isInitializedRef.current) return;
 
@@ -194,9 +250,17 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
 
     cyRef.current = cy;
     isInitializedRef.current = true;
+    
     cy.on('tap', 'node', (evt) => {
       const node = evt.target;
-      onNodeClickRef.current?.({ id: node.id(), status: node.data('status') });
+      onNodeClickRef.current?.({ 
+        id: node.id(), 
+        accountId: node.data('account_id') || node.id(),
+        nodeType: node.data('node_type') || 'account',
+        label: node.data('label') || node.id(),
+        risk: node.data('risk') || 0,
+        status: node.data('status')
+      });
     });
 
     cy.on('tap', (evt) => {
@@ -230,7 +294,6 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
     const observer = new ResizeObserver(() => {
       cy.resize();
       if (nodes.length > 0) {
-        applyDashboardLayout(cy, nodes, edges, container, false);
         cy.fit(cy.elements(), getGraphBounds(container).padding);
       }
     });
@@ -239,7 +302,7 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
     return () => observer.disconnect();
   }, [nodes, edges]);
 
-  // 2. Data sync: update in place without recreating cy instance.
+  // 2. Data sync
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy || !isInitializedRef.current) return;
@@ -250,9 +313,9 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
 
       // Update or Add Nodes
       nodes.forEach((item) => {
-        const nodeId = String(item.accountId || item.id);
+        const nodeId = String(item.accountId || item.id || item.account_id);
         currentIds.add(nodeId);
-        const displayLabel = role === "admin" ? nodeId : maskAccount(nodeId);
+        const displayLabel = nodeId;
         
         const existing = cy.getElementById(nodeId);
         if (existing.length > 0) {
@@ -264,17 +327,23 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
 
       // Update or Add Edges
       edges.forEach((edge) => {
-        const edgeId = String(edge.id || edge.tx_id || `${edge.source}-${edge.target}`);
+        const edgeId = String(edge.id || edge.tx_id || `${edge.source || edge.from}-${edge.target || edge.to}`);
         currentIds.add(edgeId);
+        
+        const edgeData = {
+          ...edge,
+          source: edge.source || edge.from,
+          target: edge.target || edge.to
+        };
         
         const existing = cy.getElementById(edgeId);
         if (existing.length > 0) {
-          existing.data({ ...edge, label: edge.label || formatTransactionLabel(edge) });
+          existing.data({ ...edgeData, label: edgeData.label || formatTransactionLabel(edgeData) });
         } else {
           cy.add({ data: {
-            ...edge,
+            ...edgeData,
             id: edgeId,
-            label: edge.label || formatTransactionLabel(edge)
+            label: edgeData.label || formatTransactionLabel(edgeData)
           } });
         }
       });
@@ -288,9 +357,7 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
     });
 
     if (nodes.length > 0) {
-      applyDashboardLayout(cy, nodes, edges, containerRef.current, false);
       cy.layout(layoutConfig).run();
-      cy.fit(cy.elements(), 70);
     }
   }, [nodes, edges]);
 
@@ -301,7 +368,7 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
       style={{
         width: '100%',
         height: '100%',
-        background: '#f1f5f9',
+        background: '#090d16',
         textAlign: 'left'
       }}
     />

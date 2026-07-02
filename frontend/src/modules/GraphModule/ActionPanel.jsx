@@ -1,176 +1,133 @@
-import ActionLog from './ActionLog';
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
+import { 
+  Compass, ZoomIn, FileText, Calendar, ShieldAlert, 
+  XCircle, ArrowRightLeft, RefreshCw, HelpCircle
+} from 'lucide-react';
+import InvestigationLog from './InvestigationLog';
 
-/**
- * ActionPanel Component (Final Polish)
- * 
- * High-fidelity command center for investigation.
- */
-const ActionPanel = ({ 
-  caseId, 
-  caseState,
-  lastActionStatus,
-  leadNodeId,
-  processingNodes,
-  actionLog, 
-  executeAction,
-  onLogClick,
-  role
-}) => {
-  const isGlobalProcessing = !!processingNodes['GLOBAL'] || role !== 'admin';
-
-  const getStatusIndicator = () => {
-    switch (lastActionStatus) {
-      case 'BUSY': return { label: 'Processing', color: '#f59e0b', icon: '🟡' };
-      case 'ERROR': return { label: 'System Error', color: '#ef4444', icon: '🔴' };
-      default: return { label: 'System Ready', color: '#10b981', icon: '🟢' };
-    }
-  };
-
-  const status = getStatusIndicator();
+export default function ActionPanel({
+  caseId,
+  selectedNode,
+  onTraceMoneyFlow,
+  onExpandNetwork,
+  onToggleTimeline,
+  onHighlightSuspicious,
+  onClearHighlights,
+  logs = [],
+  onLogClick
+}) {
+  const navigate = useNavigate();
 
   return (
-    <aside style={{
-      width: '100%',
-      background: '#fff',
-      borderLeft: '1px solid #e2e8f0',
-      display: 'flex',
-      flexDirection: 'column',
-      padding: '24px',
-      gap: '24px'
-    }}>
-      {/* System Status Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <span style={{ fontSize: '10px' }}>{status.icon}</span>
-          <span style={{ fontSize: '11px', fontWeight: 700, color: status.color, textTransform: 'uppercase' }}>
-            {status.label}
-          </span>
-        </div>
-        <div style={{ fontSize: '11px', fontWeight: 700, color: '#94a3b8' }}>V1.4.2-PROD</div>
+    <aside className="w-full bg-slate-950 border-l border-slate-900 flex flex-col p-6 gap-6 h-full text-xs">
+      
+      {/* Title */}
+      <div className="flex justify-between items-center pb-2 border-b border-slate-900">
+        <h3 className="text-xs uppercase font-black text-slate-500 tracking-wider">
+          Forensic Toolkit
+        </h3>
+        <span className="text-[10px] font-bold text-slate-600 font-mono">v2.0L-REST</span>
       </div>
 
-      {/* Case Overview */}
-      <div style={{ padding: '20px', background: '#f8fafc', borderRadius: '16px', border: '1px solid #f1f5f9' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div>
-            <h3 style={{ margin: '0 0 2px 0', fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase' }}>Case ID</h3>
-            <div style={{ fontSize: '1.125rem', fontWeight: 800, color: '#1e293b' }}>{caseId}</div>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <h3 style={{ margin: '0 0 2px 0', fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase' }}>Status</h3>
-            <span style={{ 
-              fontSize: '0.65rem', 
-              padding: '4px 8px', 
-              background: caseState === 'ACTIONED' || caseState === 'CLOSED' ? '#ecfdf5' : (caseState === 'MONITORING' ? '#eff6ff' : '#fef2f2'), 
-              color: caseState === 'ACTIONED' || caseState === 'CLOSED' ? '#059669' : (caseState === 'MONITORING' ? '#3b82f6' : '#ef4444'), 
-              borderRadius: '6px', 
-              fontWeight: 800 
-            }}>
-              {caseState}
-            </span>
-          </div>
+      {/* Case ID and Selected Node */}
+      <div className="bg-slate-900/60 border border-slate-850 p-4 rounded-xl space-y-3">
+        <div>
+          <span className="text-[9px] text-slate-500 uppercase font-black tracking-wider block">Active Investigation</span>
+          <span className="text-sm font-mono font-bold text-white leading-none mt-0.5 block">{caseId}</span>
         </div>
-      </div>
-
-      {/* Global & Lead Actions */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        <h4 style={{ margin: '0', fontSize: '0.75rem', color: '#64748b', fontWeight: 700 }}>Decision Support</h4>
         
-        <button 
-          onClick={() => executeAction('freeze', { accountId: 'SUSPECTS' })}
-          disabled={isGlobalProcessing || processingNodes['SUSPECTS']}
-          style={primaryButtonStyle('#3b82f6', isGlobalProcessing || processingNodes['SUSPECTS'])}
-        >
-          {processingNodes['SUSPECTS'] ? 'FREEZING NETWORK...' : `Freeze Suspect Network`}
-        </button>
+        <div className="border-t border-slate-850 pt-3">
+          <span className="text-[9px] text-slate-500 uppercase font-black tracking-wider block">Selected Target Node</span>
+          {selectedNode ? (
+            <div className="flex justify-between items-center mt-1">
+              <div>
+                <p className="text-xs font-mono font-bold text-indigo-400 truncate max-w-[150px]" title={selectedNode.id}>
+                  {selectedNode.label || selectedNode.id}
+                </p>
+                <p className="text-[9px] text-slate-500 capitalize">{selectedNode.nodeType}</p>
+              </div>
+              <span className="bg-slate-950 px-2 py-0.5 rounded border border-slate-850 font-bold text-[9px] text-slate-300">
+                Risk: {selectedNode.risk}%
+              </span>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-600 italic mt-1">
+              Click any node in graph to unlock targeted actions
+            </p>
+          )}
+        </div>
+      </div>
 
-        <button 
-          onClick={() => executeAction('flag', { accountId: leadNodeId })}
-          disabled={isGlobalProcessing || processingNodes[leadNodeId]}
-          style={secondaryButtonStyle('#f59e0b', isGlobalProcessing || processingNodes[leadNodeId])}
-        >
-          Flag Primary Suspect
-        </button>
+      {/* Investigation Tools Section */}
+      <div className="space-y-3 flex-1">
+        <h4 className="text-[10px] text-slate-500 uppercase font-black tracking-wider block pl-1">
+          Investigation Tools
+        </h4>
 
-        <button 
-          onClick={() => executeAction('alert', { accountId: 'GLOBAL' })}
-          disabled={isGlobalProcessing || caseState === 'ACTIONED'}
-          style={primaryButtonStyle('#8b5cf6', isGlobalProcessing || caseState === 'ACTIONED')}
-        >
-          {caseState === 'ACTIONED' ? 'CASE ESCALATED 🚨' : 'Escalate to Authorities'}
-        </button>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+        {/* Node specific tools */}
+        <div className="space-y-2">
           <button 
-            onClick={() => executeAction('monitor', { accountId: leadNodeId || 'GLOBAL' })}
-            style={secondaryButtonStyle('#3b82f6', isGlobalProcessing)}
+            onClick={onTraceMoneyFlow}
+            disabled={!selectedNode}
+            className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold py-2.5 px-4 rounded-lg text-xs shadow-md transition-all disabled:pointer-events-none"
           >
-            Monitor
+            <Compass size={14} />
+            Trace Money Flow
           </button>
+
           <button 
-            onClick={() => executeAction('close', { accountId: 'GLOBAL' })}
-            style={secondaryButtonStyle('#10b981', isGlobalProcessing)}
+            onClick={onExpandNetwork}
+            disabled={!selectedNode}
+            className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-850 border border-slate-800 disabled:opacity-50 text-slate-350 font-bold py-2.5 px-4 rounded-lg text-xs transition-all disabled:pointer-events-none"
           >
-            Resolve
+            <ZoomIn size={14} />
+            Expand Network (2 Hops)
           </button>
         </div>
 
-        <button 
-          onClick={() => executeAction('close_fp', { accountId: 'GLOBAL' })}
-          style={secondaryButtonStyle('#64748b', isGlobalProcessing)}
-        >
-          Mark False Positive
-        </button>
+        {/* Global tools */}
+        <div className="space-y-2 pt-2 border-t border-slate-900">
+          <button 
+            onClick={onHighlightSuspicious}
+            className="w-full flex items-center justify-center gap-2 bg-red-950/20 hover:bg-red-950/40 border border-red-900/30 text-red-400 font-bold py-2.5 px-4 rounded-lg text-xs transition-all"
+          >
+            <ShieldAlert size={14} />
+            Highlight Suspicious Node/Edge (&gt;60)
+          </button>
 
-        {lastActionStatus === 'ERROR' && (
-          <div style={{ 
-            fontSize: '11px', 
-            color: '#ef4444', 
-            textAlign: 'center', 
-            padding: '8px', 
-            background: '#fef2f2', 
-            borderRadius: '8px',
-            border: '1px solid #fee2e2'
-          }}>
-            Last action failed. <span style={{ textDecoration: 'underline', cursor: 'pointer', fontWeight: 800 }}>Retry connection?</span>
+          <div className="grid grid-cols-2 gap-2">
+            <button 
+              onClick={onToggleTimeline}
+              className="flex items-center justify-center gap-1.5 bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-300 font-semibold py-2 px-3 rounded-lg text-[11px] transition-all"
+            >
+              <Calendar size={13} />
+              Timeline
+            </button>
+            <button 
+              onClick={onClearHighlights}
+              className="flex items-center justify-center gap-1.5 bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-300 font-semibold py-2 px-3 rounded-lg text-[11px] transition-all"
+            >
+              <XCircle size={13} />
+              Reset View
+            </button>
           </div>
-        )}
+
+          <button 
+            onClick={() => navigate(`/report/${caseId}`)}
+            className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-4 rounded-lg text-xs shadow-md shadow-blue-950/30 transition-all"
+          >
+            <FileText size={14} />
+            Generate Investigation Report
+          </button>
+        </div>
       </div>
 
-      {/* Audit Log (Linked) */}
-      <div style={{ flex: 1, borderTop: '1px solid #f1f5f9', paddingTop: '20px' }}>
-        <ActionLog logs={actionLog} onLogClick={onLogClick} />
+      {/* Investigation Log */}
+      <div className="border-t border-slate-900 pt-4 mt-auto">
+        <InvestigationLog logs={logs} onLogClick={onLogClick} />
       </div>
+
     </aside>
   );
-};
-
-const primaryButtonStyle = (color, isDisabled) => ({
-  width: '100%',
-  padding: '12px',
-  background: isDisabled ? '#f1f5f9' : color,
-  color: isDisabled ? '#94a3b8' : '#fff',
-  border: 'none',
-  borderRadius: '12px',
-  fontWeight: 700,
-  fontSize: '0.8125rem',
-  cursor: isDisabled ? 'default' : 'pointer',
-  transition: 'all 0.2s',
-  opacity: isDisabled ? 0.7 : 1,
-  boxShadow: isDisabled ? 'none' : `0 4px 12px ${color}30`
-});
-
-const secondaryButtonStyle = (color, isDisabled) => ({
-  width: '100%',
-  padding: '12px',
-  background: '#fff',
-  color: isDisabled ? '#94a3b8' : color,
-  border: `1px solid ${isDisabled ? '#e2e8f0' : color + '40'}`,
-  borderRadius: '12px',
-  fontWeight: 700,
-  fontSize: '0.8125rem',
-  cursor: isDisabled ? 'default' : 'pointer',
-  transition: 'all 0.2s'
-});
-
-export default ActionPanel;
+}

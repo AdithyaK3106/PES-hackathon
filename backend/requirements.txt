@@ -1,3 +1,9 @@
 fastapi
 uvicorn
 pydantic
+pdfplumber
+pandas
+python-dateutil
+openpyxl
+requests
+python-multipart

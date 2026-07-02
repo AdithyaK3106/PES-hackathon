@@ -1,6 +1,6 @@
-# SENTINEL - Real-Time Fraud Response System
+# SENTINEL - Fraud Detection & Static Financial Analysis Workstation
 
-**A hackathon-scale intelligent fraud detection and investigation platform with real-time transaction analysis, dynamic case management, and investigative action engine.**
+**An advanced fraud investigation platform that parses raw bank statements (PDF, CSV, XLSX, TXT), performs static pattern analysis, and generates interactive, physics-based money flow graphs.**
 
 ---
 
@@ -23,19 +23,17 @@
 
 ## 🎯 Project Overview
 
-**SENTINEL** is a real-time fraud investigation platform designed to detect, analyze, and respond to financial crimes in real-time. The system processes transaction streams, applies hybrid rule-based and ML scoring, creates connected case graphs, and enables investigators to take rapid investigative actions (account freezes, telecom flags, police alerts).
+**SENTINEL** is a comprehensive forensic workstation built for financial crime analysts. It seamlessly ingests raw bank statements from multiple Indian banks (Axis, Kotak, SBI, Union Bank, etc.) in various formats, normalizes the data, and automatically constructs highly isolated, physics-driven (Cytoscape) graphs representing money flows. 
 
 ### Key Capabilities
 
-- **Real-time Transaction Processing**: Ingest and score transactions within milliseconds
-- **Intelligent Risk Scoring**: Hybrid rule-based + ML-guided scoring engine
-- **Dynamic Case Management**: Automatically link related fraud transactions into investigation cases
-- **Transaction Graph Visualization**: Visual representation of fraud chains and money flows
-- **Investigative Actions**: Freeze accounts, flag phone numbers, alert police, monitor accounts
-- **Recovery Calculation**: Track recoverable amounts across accounts in fraud chains
-- **Action Logging & Audit Trail**: Complete compliance-ready audit logs
-- **WebSocket Broadcasting**: Real-time event streaming to investigators' dashboards
-- **Transaction Simulator**: Configurable fraud scenario generator for demos and testing
+- **Multi-Format Statement Parsing**: Extracts and normalizes transactions from PDFs, CSVs, Excel files, and unstructured text using robust regex and `pdfplumber`.
+- **Entity Extraction**: Automatically identifies names, UPI IDs, bank names, IFSC codes, and merchants directly from unstructured transaction narrations.
+- **Isolated Money Flow Graphs**: Constructs strict, case-isolated network topologies for each uploaded document without cross-contamination.
+- **Physics-Based Layouts**: Utilizes Cytoscape's `cose` layout for organic, hub-and-spoke visualization of dense financial networks.
+- **Intelligent Risk Scoring**: Evaluates transactions for structuring, rapid downstream transfers, and suspicious offshore activity.
+- **Global Contextual Search**: Client-side scoped search that filters global entities dynamically based on the active investigation.
+- **Automated Forensic Reporting**: Generates executive summaries and transaction timelines instantly.
 
 ---
 

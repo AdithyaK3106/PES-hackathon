@@ -1,118 +1,162 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { FileText, GitBranch, ShieldAlert, CheckCircle, Percent, Eye } from 'lucide-react';
 import RiskBadge from './RiskBadge';
-import GoldenTimer from './GoldenTimer';
-import ActionButton from './ActionButton';
-import FactorBreakdown from './FactorBreakdown';
-import { maskAccount } from '../utils/maskAccount';
 
-const CaseCard = ({ caseData, onAnalyze, transactions = [], role }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const isViewer = role !== 'admin';
-  
+const CaseCard = ({ caseData, onAnalyze }) => {
+  const navigate = useNavigate();
+  const [isHovered, setIsHovered] = useState(false);
+
   if (!caseData) return null;
 
-  const totalFraud = caseData.total_fraud_amount || 0;
-  const recoverable = caseData.recoverable_amount || 0;
-  const recoveryPercent = totalFraud > 0 ? ((recoverable / totalFraud) * 100).toFixed(1) : "0.0";
+  const {
+    case_id,
+    account_id,
+    status,
+    risk_score,
+    risk_level,
+    total_transactions,
+    total_credits,
+    total_debits,
+    pattern_count,
+    patterns_detected = [],
+    parser_confidence,
+    source_file
+  } = caseData;
 
-  // Get factors from the first transaction associated with this case
-  const relatedTx = transactions.find(tx => tx.case_id === caseData.case_id);
-  const factors = relatedTx?.risk_factors || [];
-
-  const handleAction = async (e, actionEndpoint) => {
-    e.stopPropagation();
-    if (isViewer) return;
+  const formatINR = (value) => {
+    if (value === undefined || value === null) return '₹0';
     try {
-      const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
-      await fetch(`${API_BASE}/action/${actionEndpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          case_id: caseData.case_id,
-          account_id: 'GLOBAL',
-          reason: `Action ${actionEndpoint} executed from Case Card`
-        })
-      });
-    } catch (error) {
-      console.error('Network error during action:', error);
+      const num = parseInt(value);
+      const s = String(num);
+      if (s.length <= 3) return `₹${s}`;
+      const lastThree = s.substring(s.length - 3);
+      let remaining = s.substring(0, s.length - 3);
+      const groups = [];
+      while (remaining.length > 0) {
+        groups.push(remaining.substring(Math.max(0, remaining.length - 2)));
+        remaining = remaining.substring(0, Math.max(0, remaining.length - 2));
+      }
+      groups.reverse();
+      return `₹${groups.join(',')},${lastThree}`;
+    } catch {
+      return `₹${Number(value).toLocaleString('en-IN')}`;
     }
+  };
+
+  const getStatusColor = (s) => {
+    if (s === 'HIGH_RISK') return 'bg-red-500/10 text-red-400 border-red-500/20';
+    if (s === 'ANALYZED') return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+    return 'bg-slate-500/10 text-slate-400 border-slate-550';
   };
 
   return (
     <div 
-      onClick={() => onAnalyze && onAnalyze(caseData, relatedTx)}
-      className={`bg-card border border-border rounded-xl p-6 shadow-sm transition-all duration-300 cursor-pointer ${isExpanded ? 'ring-2 ring-primary/50' : 'hover:border-primary/50'}`}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      onClick={() => onAnalyze && onAnalyze(caseData)}
+      className="group relative bg-slate-900 border border-slate-800 rounded-xl p-5 hover:border-slate-700 hover:bg-slate-900/80 transition-all duration-300 flex flex-col justify-between shadow-lg"
     >
-      <div className="flex justify-between items-start mb-4" onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }}>
-        <div>
-          <h3 className="text-sm font-mono text-muted-foreground uppercase tracking-wider mb-1">Case ID</h3>
-          <p className="text-lg font-bold">{caseData.case_id}</p>
+      <div>
+        {/* Top Header */}
+        <div className="flex justify-between items-start gap-2 mb-3">
+          <div>
+            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Case Investigation</span>
+            <h3 className="text-sm font-bold text-gray-200 font-mono tracking-tight mt-0.5">{case_id}</h3>
+          </div>
+          <RiskBadge score={risk_score} />
         </div>
-        <RiskBadge score={caseData.risk_level} />
-      </div>
 
-      <div className="grid grid-cols-2 gap-4 mb-6">
-        <div>
-          <span className="text-xs text-muted-foreground block">Chain Depth</span>
-          <span className="font-semibold text-sm">{caseData.chain?.length || 0} Accounts</span>
+        {/* Account Details */}
+        <div className="bg-slate-950/40 border border-slate-850 rounded-lg p-3 mb-4 flex justify-between items-center">
+          <div>
+            <span className="text-[9px] text-slate-500 font-bold uppercase block">Target Account</span>
+            <span className="text-xs font-mono font-bold text-gray-100">{account_id}</span>
+          </div>
+          <span className={`text-[9px] px-2 py-0.5 rounded border font-bold uppercase tracking-wider ${getStatusColor(status)}`}>
+            {status}
+          </span>
         </div>
-        <div>
-          <span className="text-xs text-muted-foreground block">Recovery Status</span>
-          <span className="font-semibold text-sm">{recoveryPercent}%</span>
+
+        {/* Stats Grid */}
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="bg-slate-900/60 p-2.5 rounded border border-slate-850/50">
+            <span className="text-[9px] text-slate-500 uppercase font-bold block">Inflow Volume</span>
+            <span className="text-xs font-bold text-emerald-400">{formatINR(total_credits)}</span>
+          </div>
+          <div className="bg-slate-900/60 p-2.5 rounded border border-slate-850/50">
+            <span className="text-[9px] text-slate-500 uppercase font-bold block">Outflow Volume</span>
+            <span className="text-xs font-bold text-red-400">{formatINR(total_debits)}</span>
+          </div>
         </div>
-      </div>
 
-      <div className="space-y-3 mb-6">
-        <div className="flex justify-between items-center text-sm">
-          <span className="text-muted-foreground">Total Fraud</span>
-          <span className="font-mono font-bold">₹{caseData.total_fraud_amount.toLocaleString()}</span>
+        {/* Mid Stats */}
+        <div className="space-y-2 mb-4 text-xs">
+          <div className="flex justify-between items-center">
+            <span className="text-slate-400">Total Transactions</span>
+            <span className="font-semibold text-gray-200">{total_transactions}</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-slate-400 flex items-center gap-1">
+              <ShieldAlert size={12} className="text-indigo-400" />
+              Patterns Detected
+            </span>
+            <span className="font-semibold text-gray-200">{pattern_count}</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-slate-400 flex items-center gap-1">
+              <Percent size={12} className="text-indigo-400" />
+              Parser Confidence
+            </span>
+            <span className={`font-semibold ${parser_confidence >= 90 ? "text-emerald-400" : "text-amber-400"}`}>
+              {parser_confidence}%
+            </span>
+          </div>
         </div>
-        <div className="flex justify-between items-center text-sm">
-          <span className="text-muted-foreground">Recoverable</span>
-          <span className="font-mono text-green-500 font-bold">₹{caseData.recoverable_amount.toLocaleString()}</span>
-        </div>
-      </div>
 
-      <div className="pt-4 border-t border-border flex justify-between items-center mb-6">
-        <GoldenTimer minutes={caseData.golden_window_minutes} />
-        <span className="text-[10px] px-2 py-1 bg-muted rounded uppercase font-bold text-muted-foreground">
-          {caseData.status}
-        </span>
-      </div>
-
-      {/* Action Buttons */}
-      <div className="grid grid-cols-3 gap-2 mb-4">
-        <ActionButton label="Freeze" onClick={(e) => handleAction(e, 'freeze')} disabled={isViewer} className="bg-red-600 hover:bg-red-700 text-[10px] py-1" />
-        <ActionButton label="Police" onClick={(e) => handleAction(e, 'alert')} disabled={isViewer} className="bg-blue-600 hover:bg-blue-700 text-[10px] py-1" />
-        <ActionButton label="Escalate" onClick={(e) => handleAction(e, 'flag')} disabled={isViewer} className="bg-amber-600 hover:bg-amber-700 text-[10px] py-1" />
-      </div>
-
-      {/* Expandable Section */}
-      {isExpanded && (
-        <div className="mt-6 pt-6 border-t border-border animate-in slide-in-from-top-2 duration-300">
-          <div className="mb-6">
-            <h4 className="text-[10px] font-bold uppercase text-muted-foreground mb-3 tracking-widest">Transaction Chain</h4>
-            <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono bg-background/50 p-3 rounded-lg">
-              {caseData.chain.map((account, idx) => (
-                <React.Fragment key={account}>
-                  <span className="bg-primary/10 text-primary px-2 py-1 rounded border border-primary/20">
-                    {isViewer ? maskAccount(account) : account}
-                  </span>
-                  {idx < caseData.chain.length - 1 && <span className="opacity-30">→</span>}
-                </React.Fragment>
+        {/* Detected Patterns list (preview) */}
+        {patterns_detected.length > 0 && (
+          <div className="mb-4 pt-3 border-t border-slate-850">
+            <span className="text-[9px] text-slate-500 uppercase font-bold block mb-1.5">Flagged Triggers</span>
+            <div className="flex flex-wrap gap-1">
+              {patterns_detected.slice(0, 3).map((pat) => (
+                <span key={pat} className="text-[8px] font-black bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded uppercase">
+                  {pat}
+                </span>
               ))}
+              {patterns_detected.length > 3 && (
+                <span className="text-[8px] font-bold text-slate-500 px-1 py-0.5">
+                  +{patterns_detected.length - 3} more
+                </span>
+              )}
             </div>
           </div>
-          <FactorBreakdown factors={factors} />
-        </div>
-      )}
+        )}
+      </div>
 
-      <button 
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full text-[10px] uppercase font-bold text-muted-foreground hover:text-primary transition-colors pt-2"
-      >
-        {isExpanded ? 'Show Less' : 'Analyze Case'}
-      </button>
+      {/* Buttons */}
+      <div className="pt-3 border-t border-slate-850 flex gap-2 w-full mt-auto">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate(`/graph/${case_id}`);
+          }}
+          className="flex-1 bg-slate-800 hover:bg-slate-700 text-gray-300 font-semibold py-1.5 px-3 rounded-lg text-[10px] transition-all flex items-center justify-center gap-1 border border-slate-750"
+        >
+          <GitBranch size={10} />
+          Graph
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate(`/report/${case_id}`);
+          }}
+          className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-1.5 px-3 rounded-lg text-[10px] shadow-md transition-all flex items-center justify-center gap-1"
+        >
+          <FileText size={10} />
+          Report
+        </button>
+      </div>
     </div>
   );
 };

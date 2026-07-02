@@ -1,42 +1,63 @@
+import React from 'react';
+
 const Legend = () => {
-  const items = [
-    { label: 'Active', color: '#3B82F6', icon: '' },
-    { label: 'Flagged', color: '#F97316', icon: '⚠' },
-    { label: 'Frozen', color: '#9CA3AF', icon: '🔒' },
-    { label: 'Withdrawn', color: '#EF4444', icon: '✗', dashed: true }
+  const shapes = [
+    { label: 'Account', color: '#3b82f6', shapeCls: 'rounded-full' },
+    { label: 'Person', color: '#a855f7', shapeCls: 'rotate-45 scale-90 border' },
+    { label: 'UPI ID', color: '#14b8a6', shapeCls: 'polygon-hexagon scale-90' },
+    { label: 'Merchant', color: '#f97316', shapeCls: 'rounded-sm' },
+    { label: 'Bank', color: '#6366f1', shapeCls: 'w-5 h-3 rounded-none' }
+  ];
+
+  const risks = [
+    { label: 'High Risk (>=70)', color: '#ef4444' },
+    { label: 'Medium Risk (40-69)', color: '#f59e0b' },
+    { label: 'Low Risk (<40)', color: '#10b981' },
+    { label: 'External / Unknown', color: '#64748b' }
   ];
 
   return (
-    <div style={{
-      position: 'absolute',
-      top: '20px',
-      right: '20px',
-      background: 'rgba(255, 255, 255, 0.95)',
-      padding: '12px 16px',
-      borderRadius: '12px',
-      border: '1px solid #e2e8f0',
-      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)',
-      backdropFilter: 'blur(8px)',
-      zIndex: 100,
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '8px'
-    }}>
-      <h4 style={{ margin: '0 0 4px 0', fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Legend</h4>
-      {items.map((item) => (
-        <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{
-            width: '14px',
-            height: '14px',
-            borderRadius: '4px',
-            background: item.color,
-            border: `1.5px ${item.dashed ? 'dashed' : 'solid'} rgba(0,0,0,0.1)`
-          }} />
-          <span style={{ fontSize: '13px', color: '#334155', fontWeight: 500 }}>
-            {item.label} {item.icon}
-          </span>
+    <div className="absolute top-5 left-5 bg-slate-950/90 border border-slate-800 p-4 rounded-xl shadow-2xl backdrop-blur-md z-40 flex flex-col gap-4 text-xs max-w-xs">
+      
+      {/* Node Types */}
+      <div>
+        <h4 className="text-[10px] text-slate-500 uppercase font-black tracking-wider mb-2.5">Entity Types</h4>
+        <div className="space-y-2">
+          {shapes.map((item) => (
+            <div key={item.label} className="flex items-center gap-3">
+              <div 
+                className={`w-3.5 h-3.5 border border-slate-700/50 bg-slate-900 shrink-0 ${item.shapeCls}`} 
+                style={{ 
+                  backgroundColor: item.color,
+                  clipPath: item.label === 'UPI ID' ? 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)' : 'none'
+                }}
+              />
+              <span className="text-slate-300 font-medium">{item.label}</span>
+            </div>
+          ))}
         </div>
-      ))}
+      </div>
+
+      {/* Risk Metrics */}
+      <div className="border-t border-slate-900 pt-3">
+        <h4 className="text-[10px] text-slate-500 uppercase font-black tracking-wider mb-2.5">Risk Profile</h4>
+        <div className="space-y-2">
+          {risks.map((item) => (
+            <div key={item.label} className="flex items-center gap-3">
+              <div 
+                className="w-3.5 h-3.5 rounded-full shrink-0" 
+                style={{ backgroundColor: item.color }}
+              />
+              <span className="text-slate-300 font-medium">{item.label}</span>
+            </div>
+          ))}
+          <div className="flex items-center gap-3">
+            <div className="w-3.5 h-3.5 rounded-full bg-slate-900 border-2 border-red-500 shrink-0" />
+            <span className="text-slate-300 font-medium">Suspicious Match</span>
+          </div>
+        </div>
+      </div>
+
     </div>
   );
 };
