@@ -2,10 +2,13 @@ import React, { useMemo, useRef, useState, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom';
 import GraphCanvas from './GraphCanvas';
 import Legend from './Legend';
-import { 
-  Calendar, X, Compass, ZoomIn, ShieldAlert, XCircle, 
-  FileText, ArrowLeft, ArrowRight, Download, Filter, 
-  ChevronDown, Search, Activity, HelpCircle, User, 
+import HierarchyLegend from './HierarchyLegend';
+import TreeNodeInspector from './TreeNodeInspector';
+import HierarchyGuide from './HierarchyGuide';
+import {
+  Calendar, X, Compass, ZoomIn, ShieldAlert, XCircle,
+  FileText, ArrowLeft, ArrowRight, Download, Filter,
+  ChevronDown, Search, Activity, HelpCircle, User,
   AlertTriangle, CheckCircle, HelpCircle as HelpIcon,
   Layers, Database, Landmark, Percent
 } from 'lucide-react';
@@ -36,6 +39,7 @@ export default function GraphModule({ caseDetails }) {
   const [showFilters, setShowFilters] = useState(false);
   const [riskFilter, setRiskFilter] = useState('ALL');
   const [logs, setLogs] = useState([]);
+  const [showGuide, setShowGuide] = useState(false);
   const canvasRef = useRef(null);
   const role = getRole();
 
@@ -432,7 +436,16 @@ export default function GraphModule({ caseDetails }) {
             )}
           </div>
 
-          <button 
+          <button
+            onClick={() => setShowGuide(true)}
+            className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-850 text-slate-300 font-bold py-1 px-2.5 rounded-lg text-[10px] border border-slate-800 transition-all"
+            title="Learn about hierarchical tree layout"
+          >
+            <HelpCircle size={12} />
+            Guide
+          </button>
+
+          <button
             onClick={handleExport}
             className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-1 px-2.5 rounded-lg text-[10px] shadow-sm shadow-indigo-950/20 transition-all"
           >
@@ -442,6 +455,9 @@ export default function GraphModule({ caseDetails }) {
         </div>
       </header>
 
+      {/* Hierarchy Guide Modal */}
+      {showGuide && <HierarchyGuide onClose={() => setShowGuide(false)} />}
+
       {/* Main Content Workspace Area */}
       <div className="flex flex-1 w-full min-h-0 overflow-hidden relative">
         
@@ -450,9 +466,12 @@ export default function GraphModule({ caseDetails }) {
           
           {/* Graph Canvas Wrapper */}
           <div className="flex-1 w-full min-h-0 relative bg-slate-950">
-            
+
             {/* Legend Component */}
             <Legend />
+
+            {/* Hierarchy Legend */}
+            <HierarchyLegend />
 
             {/* Floating Risk Donut chart overlay */}
             <div className="absolute bottom-5 left-5 bg-slate-950/90 border border-slate-800 rounded-xl p-3 shadow-2xl backdrop-blur-md z-30 max-w-[170px] flex flex-col gap-2">
@@ -635,7 +654,14 @@ export default function GraphModule({ caseDetails }) {
 
         {/* Right Side Section: Node details sidebar */}
         <aside className="w-80 h-full bg-slate-950 border-l border-slate-900 flex flex-col p-5 overflow-y-auto shrink-0 select-none text-[11px] relative">
-          {selectedNodeDetails ? (
+          {selectedNode ? (
+            <TreeNodeInspector
+              node={selectedNode}
+              onClose={() => setSelectedNode(null)}
+              onTraceFlow={handleTraceMoneyFlow}
+              onExpandNetwork={handleExpandNetwork}
+            />
+          ) : selectedNodeDetails ? (
             <div className="space-y-5 animate-in slide-in-from-right-3 duration-200">
               
               {/* Sidebar Header */}
