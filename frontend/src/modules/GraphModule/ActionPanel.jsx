@@ -15,7 +15,8 @@ export default function ActionPanel({
   onHighlightSuspicious,
   onClearHighlights,
   logs = [],
-  onLogClick
+  onLogClick,
+  onStartReplay
 }) {
   const navigate = useNavigate();
 
@@ -112,6 +113,14 @@ export default function ActionPanel({
               Reset View
             </button>
           </div>
+
+          <button 
+            onClick={onStartReplay}
+            className="w-full flex items-center justify-center gap-2 bg-indigo-950/30 hover:bg-indigo-900/50 border border-indigo-900/30 text-indigo-400 font-bold py-2.5 px-4 rounded-lg text-xs transition-all"
+          >
+            <RefreshCw size={13} />
+            Run Investigation Replay
+          </button>
 
           <button 
             onClick={() => navigate(`/report/${caseId}`)}

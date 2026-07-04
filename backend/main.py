@@ -249,5 +249,10 @@ def seed_demo_data():
         "errors": errors
     }
 
+@app.post("/log")
+def log_message(payload: dict) -> dict:
+    print(f"[FRONTEND LOG] {payload.get('msg')}")
+    return {"status": "ok"}
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

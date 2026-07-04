@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import cytoscape from 'cytoscape';
-import { graphStyles } from './graphStyles';
+import { graphStyles, getRiskColors } from './graphStyles';
 import { getRole } from '../../roleStore';
 import { maskAccount } from '../../utils/maskAccount';
 
@@ -149,7 +149,153 @@ const layoutConfig = {
   animate: true
 };
 
-const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) => {
+const isNodeInViewport = (cy, node) => {
+  const rect = node.boundingBox();
+  const extent = cy.extent();
+  return (
+    rect.x1 >= extent.x1 &&
+    rect.x2 <= extent.x2 &&
+    rect.y1 >= extent.y1 &&
+    rect.y2 <= extent.y2
+  );
+};
+
+const animateEdgeGrowth = (cy, edgeId, sourceId, targetId, duration, playbackSpeed = 0.5) => {
+  const sourceNode = cy.getElementById(sourceId);
+  const targetNode = cy.getElementById(targetId);
+  const realEdge = cy.getElementById(edgeId);
+
+  if (sourceNode.length === 0 || targetNode.length === 0 || realEdge.length === 0) {
+    return Promise.resolve();
+  }
+
+  const startPos = sourceNode.position();
+  const endPos = targetNode.position();
+
+  const dummyNodeId = `dummy-head-${edgeId}`;
+  const dummyEdgeId = `dummy-edge-${edgeId}`;
+
+  // Add a helper node that travels along the edge (moving glow)
+  cy.add({
+    group: 'nodes',
+    data: { id: dummyNodeId },
+    position: { ...startPos },
+    style: {
+      'width': 8,
+      'height': 8,
+      'background-color': '#f59e0b',
+      'border-width': 0,
+      'opacity': 1,
+      'z-index': 200,
+      'events': 'no',
+      'overlay-opacity': 0
+    }
+  });
+
+  // Add dummy edge connecting source and helper node
+  cy.add({
+    group: 'edges',
+    data: {
+      id: dummyEdgeId,
+      source: sourceId,
+      target: dummyNodeId
+    },
+    style: {
+      'line-color': '#f59e0b',
+      'width': 3,
+      'target-arrow-shape': 'none',
+      'opacity': 0.8,
+      'curve-style': 'bezier',
+      'z-index': 190,
+      'events': 'no'
+    }
+  });
+
+  const dummyNode = cy.getElementById(dummyNodeId);
+  const dummyEdge = cy.getElementById(dummyEdgeId);
+
+  return new Promise((resolve) => {
+    let resolved = false;
+    const safeResolve = () => {
+      if (!resolved) {
+        resolved = true;
+        resolve();
+      }
+    };
+
+    const safetyTimeout = setTimeout(() => {
+      try {
+        if (cy.getElementById(dummyNodeId).length > 0) cy.remove(cy.getElementById(dummyNodeId));
+        if (cy.getElementById(dummyEdgeId).length > 0) cy.remove(cy.getElementById(dummyEdgeId));
+        const pulseId = `pulse-${edgeId}`;
+        if (cy.getElementById(pulseId).length > 0) cy.remove(cy.getElementById(pulseId));
+        realEdge.removeClass('hidden-replay');
+        realEdge.css({ opacity: 1 });
+      } catch (err) {}
+      safeResolve();
+    }, (duration * 2.5) + 800);
+
+    dummyNode.animate({
+      position: endPos
+    }, {
+      duration: duration,
+      easing: 'ease-out-quad',
+      complete: () => {
+        cy.remove(dummyNode);
+        cy.remove(dummyEdge);
+
+        // Reveal the real edge with a smooth fade in
+        realEdge.removeClass('hidden-replay');
+        realEdge.css({ opacity: 0 });
+        realEdge.animate({
+          style: { opacity: 1 }
+        }, {
+          duration: 200 / playbackSpeed,
+          complete: () => {
+            // Animate a second, subtle glowing pulse travelling from sender to receiver
+            const pulseNodeId = `pulse-${edgeId}`;
+            cy.add({
+              group: 'nodes',
+              data: { id: pulseNodeId },
+              position: { ...startPos },
+              style: {
+                'width': 6,
+                'height': 6,
+                'background-color': '#f59e0b',
+                'border-width': 0,
+                'opacity': 0.9,
+                'z-index': 210,
+                'events': 'no',
+                'overlay-opacity': 0
+              }
+            });
+
+            const pulseNode = cy.getElementById(pulseNodeId);
+            pulseNode.animate({
+              position: endPos
+            }, {
+              duration: 350 / playbackSpeed, // fast, clean pulse representing money movement
+              easing: 'ease-in-out-quad',
+              complete: () => {
+                cy.remove(pulseNode);
+                clearTimeout(safetyTimeout);
+                safeResolve();
+              }
+            });
+          }
+        });
+      }
+    });
+  });
+};
+
+const GraphCanvas = forwardRef(({ 
+  nodes = [], 
+  edges = [], 
+  onNodeClick, 
+  replayMode = false, 
+  primaryAccountId = '' 
+}, ref) => {
   const containerRef = useRef(null);
   const cyRef = useRef(null);
   const isInitializedRef = useRef(false);
@@ -231,6 +377,246 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
       const cy = cyRef.current;
       if (!cy) return;
       cy.elements().removeClass('highlighted').removeClass('suspicious-flag');
+    },
+    
+    // Replay functions
+    applyReplayState: (index, replaySteps, primaryId) => {
+      const cy = cyRef.current;
+      if (!cy) return;
+
+      cy.batch(() => {
+        // Hide everything first
+        cy.elements().addClass('hidden-replay');
+
+        // Always reveal the primary account node
+        const pId = String(primaryId);
+        const primaryNode = cy.nodes().filter(n => n.data('account_id') === pId || n.data('node_type') === 'account');
+        primaryNode.removeClass('hidden-replay');
+
+        // Show nodes and edges up to the active index
+        for (let i = 0; i <= index; i++) {
+          const step = replaySteps[i];
+          if (!step) continue;
+
+          const edgeId = String(step.tx_id || step.id);
+          const edge = cy.getElementById(edgeId);
+          if (edge.length > 0) {
+            edge.removeClass('hidden-replay');
+            edge.source().removeClass('hidden-replay');
+            edge.target().removeClass('hidden-replay');
+          }
+        }
+
+        // Update node cumulative metrics up to index
+        cy.nodes().forEach(node => {
+          const nodeId = node.id();
+          let count = 0;
+          let inflow = 0;
+          let outflow = 0;
+
+          for (let i = 0; i <= index; i++) {
+            const step = replaySteps[i];
+            if (!step) continue;
+            
+            const amt = Number(step.amount || 0);
+            const fromId = String(step.source || step.from);
+            const toId = String(step.target || step.to);
+
+            if (fromId === nodeId) {
+              count++;
+              outflow += amt;
+            }
+            if (toId === nodeId) {
+              count++;
+              inflow += amt;
+            }
+          }
+
+          if (nodeId === primaryId && index < 0) {
+            node.data('tx_count', node.data('initial_tx_count') || 0);
+            node.data('total_inflow', node.data('initial_total_inflow') || 0);
+            node.data('total_outflow', node.data('initial_total_outflow') || 0);
+          } else {
+            node.data('tx_count', count);
+            node.data('total_inflow', inflow);
+            node.data('total_outflow', outflow);
+          }
+        });
+      });
+    },
+
+    animateStep: (stepEdge, playbackSpeed, isNewReceiver) => {
+      const cy = cyRef.current;
+      if (!cy) return Promise.resolve();
+
+      return new Promise(async (resolve) => {
+        let resolved = false;
+        const safeResolve = () => {
+          if (!resolved) {
+            resolved = true;
+            resolve();
+          }
+        };
+
+        const safetyTimeout = setTimeout(() => {
+          const edgeId = String(stepEdge.tx_id || stepEdge.id);
+          const targetId = String(stepEdge.target || stepEdge.to);
+          try {
+            const realEdge = cy.getElementById(edgeId);
+            if (realEdge.length > 0) {
+              realEdge.removeClass('hidden-replay');
+              realEdge.css({ opacity: 1 });
+            }
+            const targetNode = cy.getElementById(targetId);
+            if (targetNode.length > 0) {
+              targetNode.removeClass('hidden-replay');
+              targetNode.css({ opacity: 1 });
+            }
+          } catch (e) {}
+          safeResolve();
+        }, (2200 / playbackSpeed) + 1000);
+
+        const edgeId = String(stepEdge.tx_id || stepEdge.id);
+        const sourceId = String(stepEdge.source || stepEdge.from);
+        const targetId = String(stepEdge.target || stepEdge.to);
+
+        const sourceNode = cy.getElementById(sourceId);
+        const targetNode = cy.getElementById(targetId);
+        const realEdge = cy.getElementById(edgeId);
+
+        if (sourceNode.length === 0 || targetNode.length === 0 || realEdge.length === 0) {
+          clearTimeout(safetyTimeout);
+          safeResolve();
+          return;
+        }
+
+        // Ensure source node is visible
+        sourceNode.removeClass('hidden-replay');
+
+        // Cinematic viewport adjustment
+        const isSourceIn = isNodeInViewport(cy, sourceNode);
+        const isTargetIn = isNodeInViewport(cy, targetNode);
+        if (!isSourceIn || !isTargetIn) {
+          const elementsToFit = cy.collection([sourceNode, targetNode]);
+          cy.animate({
+            fit: {
+              eles: elementsToFit,
+              padding: 100
+            }
+          }, {
+            duration: 500 / playbackSpeed,
+            easing: 'ease-in-out-quad',
+            queue: false
+          });
+        }
+
+        // 1. Highlight sender node (soft blue glow)
+        sourceNode.animate({
+          style: {
+            'border-width': 8,
+            'border-color': '#3b82f6'
+          }
+        }, {
+          duration: 150 / playbackSpeed
+        });
+
+        await new Promise(r => setTimeout(r, 150 / playbackSpeed));
+
+        sourceNode.animate({
+          style: {
+            'border-width': 2,
+            'border-color': getRiskColors(sourceNode.data('risk')).border
+          }
+        }, {
+          duration: 150 / playbackSpeed
+        });
+
+        // 2. Animate edge growth
+        await animateEdgeGrowth(cy, edgeId, sourceId, targetId, 500 / playbackSpeed, playbackSpeed);
+
+        // 3. Destination node scales and fades in (or pulses amber if already visible)
+        if (isNewReceiver) {
+          targetNode.removeClass('hidden-replay');
+          targetNode.css({ opacity: 0, width: 50, height: 50 });
+          targetNode.animate({
+            style: {
+              opacity: 1,
+              width: 65,
+              height: 65
+            }
+          }, {
+            duration: 350 / playbackSpeed,
+            easing: 'ease-out-cubic'
+          });
+          await new Promise(r => setTimeout(r, 350 / playbackSpeed));
+        } else {
+          // Soft amber pulse
+          targetNode.animate({
+            style: {
+              'border-width': 8,
+              'border-color': '#f59e0b'
+            }
+          }, {
+            duration: 150 / playbackSpeed
+          });
+          await new Promise(r => setTimeout(r, 150 / playbackSpeed));
+          targetNode.animate({
+            style: {
+              'border-width': 2,
+              'border-color': getRiskColors(targetNode.data('risk')).border
+            }
+          }, {
+            duration: 200 / playbackSpeed
+          });
+        }
+
+        clearTimeout(safetyTimeout);
+        safeResolve();
+      });
+    },
+    getRenderedPosition: (nodeId) => {
+      const cy = cyRef.current;
+      if (!cy) return null;
+      const node = cy.getElementById(nodeId);
+      if (node.length > 0) {
+        return node.renderedPosition();
+      }
+      return null;
+    },
+    getContainerWidth: () => {
+      return containerRef.current?.clientWidth || 800;
+    },
+    zoomNode: (nodeId) => {
+      const cy = cyRef.current;
+      if (!cy) return;
+      const node = cy.getElementById(nodeId);
+      if (node.length > 0) {
+        cy.animate({
+          center: { eles: node },
+          zoom: Math.min(cy.zoom() * 1.1, 1.3)
+        }, {
+          duration: 400,
+          easing: 'ease-in-out-quad',
+          queue: false
+        });
+      }
+    },
+    resetZoom: () => {
+      const cy = cyRef.current;
+      if (!cy) return;
+      const visibleElements = cy.elements().filter(el => !el.hasClass('hidden-replay'));
+      if (visibleElements.length > 0) {
+        cy.animate({
+          fit: {
+            eles: visibleElements,
+            padding: 100
+          }
+        }, {
+          duration: 450,
+          easing: 'ease-in-out-quad',
+          queue: false
+        });
+      }
     }
   }));
 
@@ -317,11 +703,19 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
         currentIds.add(nodeId);
         const displayLabel = nodeId;
         
+        const nodeData = {
+          ...item,
+          displayLabel,
+          initial_tx_count: item.tx_count,
+          initial_total_inflow: item.total_inflow,
+          initial_total_outflow: item.total_outflow
+        };
+        
         const existing = cy.getElementById(nodeId);
         if (existing.length > 0) {
-          existing.data({ ...item, displayLabel });
+          existing.data(nodeData);
         } else {
-          cy.add({ data: { ...item, id: nodeId, displayLabel } });
+          cy.add({ data: { ...nodeData, id: nodeId } });
         }
       });
 
@@ -357,9 +751,24 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
     });
 
     if (nodes.length > 0) {
-      cy.layout(layoutConfig).run();
+      const layout = cy.layout(layoutConfig);
+      if (replayMode) {
+        layout.on('layoutstop', () => {
+          cy.batch(() => {
+            cy.elements().addClass('hidden-replay');
+            const primaryNode = cy.nodes().filter(n => n.data('account_id') === primaryAccountId || n.data('node_type') === 'account');
+            primaryNode.removeClass('hidden-replay');
+            primaryNode.forEach(node => {
+              node.data('tx_count', node.data('initial_tx_count') || 0);
+              node.data('total_inflow', node.data('initial_total_inflow') || 0);
+              node.data('total_outflow', node.data('initial_total_outflow') || 0);
+            });
+          });
+        });
+      }
+      layout.run();
     }
-  }, [nodes, edges]);
+  }, [nodes, edges, replayMode, primaryAccountId]);
 
   return (
     <div

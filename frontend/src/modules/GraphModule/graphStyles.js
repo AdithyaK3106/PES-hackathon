@@ -6,25 +6,15 @@ export const getRiskColors = (risk) => {
   return { bg: '#64748b', border: '#475569' };             // Gray / Unknown / External
 };
 
-export const getShape = (nodeType) => {
-  const t = String(nodeType || '').toLowerCase();
-  if (t === 'person') return 'diamond';
-  if (t === 'upi_id') return 'hexagon';
-  if (t === 'merchant') return 'rectangle';
-  if (t === 'bank') return 'rectangle';
-  if (t === 'ifsc') return 'triangle';
-  return 'ellipse'; // default for account
-};
-
 export const graphStyles = [
   {
     selector: 'node',
     style: {
       'label': 'data(displayLabel)',
-      'shape': (node) => getShape(node.data('node_type')),
-      'background-color': (node) => getRiskColors(node.data('risk')).bg,
+      'shape': 'ellipse', // default shape for account / fallback
+      'background-color': '#64748b', // default bg
       'border-width': 2,
-      'border-color': (node) => getRiskColors(node.data('risk')).border,
+      'border-color': '#475569', // default border
       'color': '#fff',
       'text-valign': 'center',
       'text-halign': 'center',
@@ -34,8 +24,62 @@ export const graphStyles = [
       'height': 65,
       'text-outline-width': 2,
       'text-outline-color': '#0f172a',
+      'text-outline-opacity': 1,
       'transition-property': 'background-color, border-color, border-width, width, height',
       'transition-duration': '0.3s'
+    }
+  },
+  // Shapes by node type using standard selectors
+  {
+    selector: 'node[node_type = "person"]',
+    style: {
+      'shape': 'diamond'
+    }
+  },
+  {
+    selector: 'node[node_type = "upi_id"]',
+    style: {
+      'shape': 'hexagon'
+    }
+  },
+  {
+    selector: 'node[node_type = "merchant"]',
+    style: {
+      'shape': 'rectangle'
+    }
+  },
+  {
+    selector: 'node[node_type = "bank"]',
+    style: {
+      'shape': 'rectangle'
+    }
+  },
+  {
+    selector: 'node[node_type = "ifsc"]',
+    style: {
+      'shape': 'triangle'
+    }
+  },
+  // Colors by risk using standard selectors
+  {
+    selector: 'node[risk >= 70]',
+    style: {
+      'background-color': '#ef4444',
+      'border-color': '#b91c1c'
+    }
+  },
+  {
+    selector: 'node[risk >= 40][risk < 70]',
+    style: {
+      'background-color': '#f59e0b',
+      'border-color': '#d97706'
+    }
+  },
+  {
+    selector: 'node[risk > 0][risk < 40]',
+    style: {
+      'background-color': '#10b981',
+      'border-color': '#047857'
     }
   },
   {
@@ -110,6 +154,20 @@ export const graphStyles = [
       'label': 'data(label)',
       'opacity': 1,
       'z-index': 110
+    }
+  },
+  {
+    selector: 'node.hidden-replay',
+    style: {
+      'opacity': 0,
+      'events': 'no'
+    }
+  },
+  {
+    selector: 'edge.hidden-replay',
+    style: {
+      'opacity': 0,
+      'events': 'no'
     }
   }
 ];
