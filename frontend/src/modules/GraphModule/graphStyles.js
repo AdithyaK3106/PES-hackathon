@@ -4,7 +4,7 @@ export const getRiskColors = (risk, nodeType) => {
   if (t === 'upi_id') return { bg: '#14b8a6', border: '#0d9488' }; // Teal
   if (t === 'merchant') return { bg: '#f97316', border: '#ea580c' }; // Orange
   if (t === 'bank') return { bg: '#6366f1', border: '#4f46e5' }; // Indigo
-  
+
   const r = Number(risk || 0);
   if (r >= 70) return { bg: '#ef4444', border: '#b91c1c' }; // Red / High
   if (r >= 40) return { bg: '#f59e0b', border: '#d97706' }; // Amber / Medium
@@ -21,6 +21,8 @@ export const getShape = (nodeType) => {
   if (t === 'ifsc') return 'triangle';
   return 'ellipse'; // default for account
 };
+
+export const getPrimaryNodeSize = () => 120;
 
 export const graphStyles = [
   {
@@ -43,7 +45,22 @@ export const graphStyles = [
       'text-wrap': 'wrap',
       'text-max-width': 120,
       'transition-property': 'background-color, border-color, border-width, width, height',
-      'transition-duration': '0.3s'
+      'transition-duration': '0.3s',
+      'z-index': 10
+    }
+  },
+  {
+    selector: 'node[is_primary="true"]',
+    style: {
+      'width': getPrimaryNodeSize(),
+      'height': getPrimaryNodeSize(),
+      'border-width': 4,
+      'font-size': 11,
+      'font-weight': 'bold',
+      'background-color': '#3b82f6',
+      'border-color': '#1e40af',
+      'box-shadow': '0 0 30px rgba(59, 130, 246, 0.6)',
+      'z-index': 100
     }
   },
   {
@@ -54,10 +71,11 @@ export const graphStyles = [
         const amt = Number(edge.data('amount') || 0);
         return Math.min(8, 2.5 + Math.log10(Math.max(1, amt / 1000)));
       },
-      'line-color': '#475569',
-      'target-arrow-color': '#475569',
+      'line-color': '#64748b',
+      'target-arrow-color': '#64748b',
       'target-arrow-shape': 'triangle',
       'curve-style': 'bezier',
+      'control-point-step-size': 60,
       'font-size': 9,
       'font-weight': 'bold',
       'text-rotation': 'autorotate',
@@ -68,8 +86,9 @@ export const graphStyles = [
       'text-border-color': '#1e293b',
       'text-border-width': 1,
       'text-border-opacity': 0.8,
-      'opacity': 0.6,
-      'arrow-scale': 0.9,
+      'opacity': 0.7,
+      'arrow-scale': 1.0,
+      'z-index': 5,
       'transition-property': 'line-color, target-arrow-color, opacity, width',
       'transition-duration': '0.2s'
     }
@@ -92,7 +111,8 @@ export const graphStyles = [
       'border-color': '#3b82f6',
       'width': 85,
       'height': 85,
-      'z-index': 100
+      'z-index': 100,
+      'box-shadow': '0 0 20px rgba(59, 130, 246, 0.8)'
     }
   },
   {
@@ -111,7 +131,8 @@ export const graphStyles = [
       'border-width': 6,
       'border-color': '#ef4444',
       'width': 85,
-      'height': 85
+      'height': 85,
+      'box-shadow': '0 0 20px rgba(239, 68, 68, 0.8)'
     }
   },
   {
@@ -128,7 +149,17 @@ export const graphStyles = [
     style: {
       'label': 'data(label)',
       'opacity': 1,
-      'z-index': 110
+      'z-index': 110,
+      'line-color': '#3b82f6',
+      'target-arrow-color': '#3b82f6'
+    }
+  },
+  {
+    selector: 'node:parent',
+    style: {
+      'background-color': '#1e293b',
+      'border-width': 2,
+      'border-color': '#475569'
     }
   }
 ];

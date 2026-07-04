@@ -1,8 +1,12 @@
 import React, { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import cytoscape from 'cytoscape';
+import dagre from 'cytoscape-dagre';
 import { graphStyles } from './graphStyles';
 import { getRole } from '../../roleStore';
 import { maskAccount } from '../../utils/maskAccount';
+
+// Register dagre plugin
+cytoscape.use(dagre);
 
 const isSelfTransfer = (edge) => {
   const desc = String(edge.description || '').toUpperCase();
@@ -14,106 +18,16 @@ const formatTransactionLabel = (edge) => {
   const channel = edge.channel || 'OTHER';
   const formattedAmount = new Intl.NumberFormat('en-IN').format(amount);
   if (isSelfTransfer(edge)) {
-    return `\u20B9${formattedAmount} (Self Transfer)`;
+    return `₹${formattedAmount} (Self Transfer)`;
   }
-  return `\u20B9${formattedAmount} via ${channel}`;
+  return `₹${formattedAmount} via ${channel}`;
 };
 
 const getGraphBounds = (container) => {
   const width = container?.clientWidth || 800;
   const height = container?.clientHeight || 600;
-  const padding = Math.max(36, Math.min(70, Math.floor(Math.min(width, height) * 0.09)));
+  const padding = 40;
   return { width, height, padding };
-};
-
-const positionNode = (cy, id, position, animate) => {
-  const node = cy.getElementById(id);
-  if (node.length === 0) return;
-
-  if (animate) {
-    node.stop();
-    node.animate({ position }, { duration: 400 });
-  } else {
-    node.position(position);
-  }
-};
-
-const applyCustomTreeLayout = (cy, nodes, primaryId, intermediateNodeIds, parentMap, container, animate) => {
-  const { width, height, padding } = getGraphBounds(container);
-  const usableWidth = Math.max(width - padding * 2, 1);
-  const usableHeight = Math.max(height - padding * 2, 1);
-
-  // Position Root Node (Level 0)
-  if (primaryId) {
-    const rootX = padding + usableWidth / 2;
-    const rootY = padding + 60;
-    positionNode(cy, primaryId, { x: rootX, y: rootY }, animate);
-  }
-
-  // Get intermediate nodes and leaf nodes
-  const intermediates = nodes.filter(n => {
-    const id = String(n.accountId || n.id || n.account_id);
-    return intermediateNodeIds.has(id);
-  });
-
-  const leaves = nodes.filter(n => {
-    const id = String(n.accountId || n.id || n.account_id);
-    return id !== primaryId && !intermediateNodeIds.has(id);
-  });
-
-  // Group leaf node IDs by parent
-  const parentToLeaves = new Map();
-  intermediates.forEach(n => {
-    const id = String(n.accountId || n.id || n.account_id);
-    parentToLeaves.set(id, []);
-  });
-  parentToLeaves.set(primaryId, []);
-
-  leaves.forEach(leaf => {
-    const leafId = String(leaf.accountId || leaf.id || leaf.account_id);
-    const parentId = parentMap.get(leafId) || primaryId;
-    if (!parentToLeaves.has(parentId)) {
-      parentToLeaves.set(parentId, []);
-    }
-    parentToLeaves.get(parentId).push(leafId);
-  });
-
-  // Y levels
-  const level1Y = padding + usableHeight * 0.45;
-  const level2Y = padding + usableHeight * 0.95;
-
-  // Position intermediates (Level 1)
-  const N1 = intermediates.length;
-  intermediates.forEach((node, idx) => {
-    const id = String(node.accountId || node.id || node.account_id);
-    const parentX = padding + (usableWidth * (idx + 0.5)) / Math.max(1, N1);
-    positionNode(cy, id, { x: parentX, y: level1Y }, animate);
-
-    // Position its children leaf nodes centered under it
-    const children = parentToLeaves.get(id) || [];
-    const K = children.length;
-    if (K > 0) {
-      const subTreeWidth = (usableWidth / Math.max(1, N1)) * 0.85;
-      children.forEach((childId, cIdx) => {
-        const xOffset = K === 1 ? 0 : (subTreeWidth * (cIdx / (K - 1) - 0.5));
-        const childX = parentX + xOffset;
-        positionNode(cy, childId, { x: childX, y: level2Y }, animate);
-      });
-    }
-  });
-
-  // Position leaves directly under root (if any)
-  const rootLeaves = parentToLeaves.get(primaryId) || [];
-  const K_root = rootLeaves.length;
-  if (K_root > 0) {
-    const rootX = padding + usableWidth / 2;
-    const subTreeWidth = usableWidth * 0.8;
-    rootLeaves.forEach((childId, cIdx) => {
-      const xOffset = K_root === 1 ? 0 : (subTreeWidth * (cIdx / (K_root - 1) - 0.5));
-      const childX = rootX + xOffset;
-      positionNode(cy, childId, { x: childX, y: level1Y }, animate);
-    });
-  }
 };
 
 const formatINR = (val) => {
@@ -126,15 +40,15 @@ const getDisplayLabel = (node, primaryId) => {
   const id = String(node.accountId || node.id || node.account_id);
   const name = node.label || id;
   const isRoot = id === primaryId;
-  
-  const amount = isRoot 
+
+  const amount = isRoot
     ? (node.total_outflow || node.total_debits || 0)
     : (node.total_inflow || node.total_outflow || 0);
-    
+
   const formattedAmount = formatINR(amount);
-  
+
   if (isRoot) {
-    return `${name}\n(Origin)\n${formattedAmount}`;
+    return `${name}\n(Primary)\n${formattedAmount}`;
   }
   return `${name}\n${formattedAmount}`;
 };
@@ -144,8 +58,6 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
   const cyRef = useRef(null);
   const isInitializedRef = useRef(false);
   const onNodeClickRef = useRef(onNodeClick);
-
-  // Tree and visibility state
   const [collapsedNodes, setCollapsedNodes] = useState(new Set());
   const parentMapRef = useRef(new Map());
   const primaryIdRef = useRef('');
@@ -155,15 +67,16 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
     onNodeClickRef.current = onNodeClick;
   }, [onNodeClick]);
 
-  // Process nodes, identify primary and classify intermediate/leaves
+  // Process nodes and identify hierarchy
   useEffect(() => {
     if (nodes.length === 0) return;
 
     // Identify Primary Account (Root)
     const primaryNode = nodes.find(n => n.node_type === 'account' && n.label?.includes('(Owner)'))
-                       || nodes.find(n => n.nodeType === 'account' && n.label?.includes('(Owner)'))
-                       || nodes.find(n => n.account_id && n.label?.includes('(Owner)'))
-                       || nodes[0];
+      || nodes.find(n => n.nodeType === 'account' && n.label?.includes('(Owner)'))
+      || nodes.find(n => n.account_id && n.label?.includes('(Owner)'))
+      || nodes[0];
+
     const primaryId = primaryNode ? String(primaryNode.accountId || primaryNode.id || primaryNode.account_id) : '';
     primaryIdRef.current = primaryId;
 
@@ -177,7 +90,6 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
       const type = String(n.nodeType || n.node_type || '').toLowerCase();
       const risk = Number(n.risk || 0);
 
-      // Leaves are merchants, upi_ids, ifsc, bank or low risk accounts
       if (type === 'merchant' || type === 'upi_id' || type === 'ifsc' || type === 'bank' || risk < 40) {
         leaves.push(n);
       } else {
@@ -188,7 +100,7 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
     const intermediateIds = new Set(intermediates.map(n => String(n.accountId || n.id || n.account_id)));
     intermediateNodeIdsRef.current = intermediateIds;
 
-    // Group leaf nodes under intermediate parent nodes
+    // Build parent-child relationships
     const parentMap = new Map();
     if (intermediates.length > 0) {
       leaves.forEach((leaf, idx) => {
@@ -204,17 +116,13 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
       });
     }
     parentMapRef.current = parentMap;
-
-    // Collapse all intermediates by default
-    setCollapsedNodes(new Set(intermediateIds));
   }, [nodes]);
 
   useImperativeHandle(ref, () => ({
     highlightNode: (nodeId, duration = 1000) => {
       const cy = cyRef.current;
       if (!cy) return;
-      
-      // Auto-expand parent if collapsed
+
       const parentId = parentMapRef.current.get(nodeId);
       if (parentId && collapsedNodes.has(parentId)) {
         setCollapsedNodes(prev => {
@@ -248,20 +156,19 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
       if (!cy) return;
       cy.elements().removeClass('highlighted');
       if (!nodeId) return;
+
       const root = cy.getElementById(nodeId);
       if (root.length === 0) return;
-      
-      // Expand any collapsed nodes along the path
+
       const nodesToExpand = new Set();
-      
+
       cy.elements().bfs({
         roots: root,
         visit: (v, e) => {
           v.addClass('highlighted');
           if (e) e.addClass('highlighted');
-          
+
           const vId = v.id();
-          // If this is a child node, mark its parent for expansion
           const parentId = parentMapRef.current.get(vId);
           if (parentId && collapsedNodes.has(parentId)) {
             nodesToExpand.add(parentId);
@@ -283,19 +190,19 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
       if (!cy) return;
       cy.elements().removeClass('highlighted');
       if (!nodeId) return;
+
       const root = cy.getElementById(nodeId);
       if (root.length === 0) return;
-      
+
       root.addClass('highlighted');
       const neighbors1 = root.neighborhood();
       neighbors1.addClass('highlighted');
-      
+
       const nodesToExpand = new Set();
-      
+
       neighbors1.nodes().forEach(n => {
         n.neighborhood().addClass('highlighted');
-        
-        // Also check if any neighbor or neighbor's neighbor needs expansion
+
         const nId = n.id();
         const parentId = parentMapRef.current.get(nId);
         if (parentId && collapsedNodes.has(parentId)) {
@@ -303,7 +210,6 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
         }
       });
 
-      // Expand the root itself if it was collapsed
       if (collapsedNodes.has(nodeId)) {
         nodesToExpand.add(nodeId);
       }
@@ -320,7 +226,7 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
       const cy = cyRef.current;
       if (!cy) return;
       cy.elements().removeClass('suspicious-flag');
-      
+
       const nodesToExpand = new Set();
 
       cy.nodes().forEach(n => {
@@ -352,7 +258,7 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
     }
   }));
 
-  // 2. Cytoscape instance setup
+  // Initialize Cytoscape
   useEffect(() => {
     if (!containerRef.current || isInitializedRef.current) return;
 
@@ -367,12 +273,11 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
 
     cyRef.current = cy;
     isInitializedRef.current = true;
-    
+
     cy.on('tap', 'node', (evt) => {
       const node = evt.target;
       const nodeId = node.id();
 
-      // If user clicked an intermediate node, toggle its collapse state
       if (intermediateNodeIdsRef.current.has(nodeId)) {
         setCollapsedNodes(prev => {
           const next = new Set(prev);
@@ -384,9 +289,9 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
           return next;
         });
       }
-      
-      onNodeClickRef.current?.({ 
-        id: node.id(), 
+
+      onNodeClickRef.current?.({
+        id: node.id(),
         accountId: node.data('account_id') || node.id(),
         nodeType: node.data('node_type') || 'account',
         label: node.data('label') || node.id(),
@@ -434,7 +339,7 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
     return () => observer.disconnect();
   }, [nodes]);
 
-  // 3. Sync nodes, edges and run custom tree layout
+  // Sync nodes and edges with DAG layout
   useEffect(() => {
     const cy = cyRef.current;
     const container = containerRef.current;
@@ -449,14 +354,22 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
       nodes.forEach((item) => {
         const nodeId = String(item.accountId || item.id || item.account_id);
         currentIds.add(nodeId);
-        
+
         const displayLabel = getDisplayLabel(item, primaryId);
-        
+        const isPrimary = nodeId === primaryId;
+
         const existing = cy.getElementById(nodeId);
         if (existing.length > 0) {
-          existing.data({ ...item, displayLabel });
+          existing.data({ ...item, displayLabel, is_primary: isPrimary ? 'true' : 'false' });
         } else {
-          cy.add({ data: { ...item, id: nodeId, displayLabel } });
+          cy.add({
+            data: {
+              ...item,
+              id: nodeId,
+              displayLabel,
+              is_primary: isPrimary ? 'true' : 'false'
+            }
+          });
         }
       });
 
@@ -468,10 +381,9 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
         const src = String(edge.source || edge.from);
         const tgt = String(edge.target || edge.to);
 
-        // Redirect edge to Intermediate node if target is a Leaf
         let newSrc = src;
         let newTgt = tgt;
-        
+
         if (!isSelfTransfer(edge)) {
           if (src === primaryId && parentMap.has(tgt)) {
             newSrc = parentMap.get(tgt);
@@ -487,7 +399,7 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
           from: newSrc,
           to: newTgt
         };
-        
+
         const label = formatTransactionLabel(edgeData);
         const classes = isSelfTransfer(edgeData) ? 'self-transfer' : '';
 
@@ -496,11 +408,13 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
           existing.data({ ...edgeData, label });
           existing.classes(classes);
         } else {
-          cy.add({ 
+          cy.add({
             data: {
               ...edgeData,
               id: edgeId,
-              label
+              label,
+              source: newSrc,
+              target: newTgt
             },
             classes
           });
@@ -514,30 +428,33 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
         }
       });
 
-      // Apply our beautiful custom top-down layout
-      applyCustomTreeLayout(
-        cy,
-        nodes,
-        primaryId,
-        intermediateNodeIdsRef.current,
-        parentMap,
-        container,
-        false // Run layout synchronously first
-      );
+      // Apply hierarchical DAG layout
+      const layout = cy.layout({
+        name: 'dagre',
+        rankDir: 'TB',
+        nodeSep: 80,
+        rankSep: 140,
+        edgeSep: 40,
+        animate: true,
+        animationDuration: 700,
+        fit: true,
+        padding: 40,
+        spacingFactor: 1.5
+      });
+
+      layout.run();
     });
   }, [nodes, edges]);
 
-  // 4. Update element visibility based on expanded/collapsed state
+  // Update visibility based on collapsed state
   useEffect(() => {
     const cy = cyRef.current;
     const container = containerRef.current;
     if (!cy || !isInitializedRef.current) return;
 
     cy.batch(() => {
-      // Show everything first
       cy.elements().style('display', 'element');
 
-      // Hide leaves whose parents are collapsed
       collapsedNodes.forEach(parentId => {
         const childrenIds = [];
         parentMapRef.current.forEach((pId, childId) => {
@@ -550,14 +467,12 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
           const childNode = cy.getElementById(childId);
           if (childNode.length > 0) {
             childNode.style('display', 'none');
-            // Hide connected edges
             childNode.connectedEdges().style('display', 'none');
           }
         });
       });
     });
 
-    // Fit visible elements
     setTimeout(() => {
       cy.animate({
         fit: {
@@ -566,7 +481,6 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
         }
       }, { duration: 400 });
     }, 50);
-
   }, [collapsedNodes]);
 
   return (
@@ -582,5 +496,7 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
     />
   );
 });
+
+GraphCanvas.displayName = 'GraphCanvas';
 
 export default React.memo(GraphCanvas);
