@@ -1,4 +1,10 @@
-export const getRiskColors = (risk) => {
+export const getRiskColors = (risk, nodeType) => {
+  const t = String(nodeType || '').toLowerCase();
+  if (t === 'person') return { bg: '#a855f7', border: '#7e22ce' }; // Purple
+  if (t === 'upi_id') return { bg: '#14b8a6', border: '#0d9488' }; // Teal
+  if (t === 'merchant') return { bg: '#f97316', border: '#ea580c' }; // Orange
+  if (t === 'bank') return { bg: '#6366f1', border: '#4f46e5' }; // Indigo
+  
   const r = Number(risk || 0);
   if (r >= 70) return { bg: '#ef4444', border: '#b91c1c' }; // Red / High
   if (r >= 40) return { bg: '#f59e0b', border: '#d97706' }; // Amber / Medium
@@ -22,18 +28,20 @@ export const graphStyles = [
     style: {
       'label': 'data(displayLabel)',
       'shape': (node) => getShape(node.data('node_type')),
-      'background-color': (node) => getRiskColors(node.data('risk')).bg,
+      'background-color': (node) => getRiskColors(node.data('risk'), node.data('node_type')).bg,
       'border-width': 2,
-      'border-color': (node) => getRiskColors(node.data('risk')).border,
+      'border-color': (node) => getRiskColors(node.data('risk'), node.data('node_type')).border,
       'color': '#fff',
       'text-valign': 'center',
       'text-halign': 'center',
-      'font-size': 10,
+      'font-size': 9,
       'font-weight': 'bold',
-      'width': 65,
-      'height': 65,
+      'width': 75,
+      'height': 75,
       'text-outline-width': 2,
       'text-outline-color': '#0f172a',
+      'text-wrap': 'wrap',
+      'text-max-width': 120,
       'transition-property': 'background-color, border-color, border-width, width, height',
       'transition-duration': '0.3s'
     }
@@ -67,12 +75,23 @@ export const graphStyles = [
     }
   },
   {
+    selector: 'edge.self-transfer',
+    style: {
+      'line-style': 'dashed',
+      'line-color': '#3b82f6',
+      'target-arrow-color': '#3b82f6',
+      'curve-style': 'bezier',
+      'control-point-step-size': 40,
+      'opacity': 0.9
+    }
+  },
+  {
     selector: 'node.highlighted',
     style: {
       'border-width': 5,
       'border-color': '#3b82f6',
-      'width': 75,
-      'height': 75,
+      'width': 85,
+      'height': 85,
       'z-index': 100
     }
   },
@@ -91,8 +110,8 @@ export const graphStyles = [
     style: {
       'border-width': 6,
       'border-color': '#ef4444',
-      'width': 75,
-      'height': 75
+      'width': 85,
+      'height': 85
     }
   },
   {

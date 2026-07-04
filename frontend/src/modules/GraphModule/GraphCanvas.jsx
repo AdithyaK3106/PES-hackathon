@@ -1,13 +1,21 @@
-import React, { useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
+import React, { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import cytoscape from 'cytoscape';
 import { graphStyles } from './graphStyles';
 import { getRole } from '../../roleStore';
 import { maskAccount } from '../../utils/maskAccount';
 
+const isSelfTransfer = (edge) => {
+  const desc = String(edge.description || '').toUpperCase();
+  return desc.includes('SELF') || desc.includes('OWN A/C') || desc.includes('SELF TRANSFER') || edge.from === edge.to;
+};
+
 const formatTransactionLabel = (edge) => {
   const amount = Number(edge.amount || 0);
   const channel = edge.channel || 'OTHER';
   const formattedAmount = new Intl.NumberFormat('en-IN').format(amount);
+  if (isSelfTransfer(edge)) {
+    return `\u20B9${formattedAmount} (Self Transfer)`;
+  }
   return `\u20B9${formattedAmount} via ${channel}`;
 };
 
@@ -15,45 +23,7 @@ const getGraphBounds = (container) => {
   const width = container?.clientWidth || 800;
   const height = container?.clientHeight || 600;
   const padding = Math.max(36, Math.min(70, Math.floor(Math.min(width, height) * 0.09)));
-
   return { width, height, padding };
-};
-
-const getNodeDepths = (nodes, edges) => {
-  const ids = nodes.map((node) => String(node.accountId || node.id));
-  const indegree = new Map(ids.map((id) => [id, 0]));
-  const children = new Map(ids.map((id) => [id, []]));
-
-  edges.forEach((edge) => {
-    const source = String(edge.source || edge.from);
-    const target = String(edge.target || edge.to);
-    if (!indegree.has(source) || !indegree.has(target)) return;
-    indegree.set(target, indegree.get(target) + 1);
-    children.get(source).push(target);
-  });
-
-  const depths = new Map();
-  let queue = ids.filter((id) => indegree.get(id) === 0);
-  if (queue.length === 0 && ids.length > 0) queue = [ids[0]];
-
-  queue.forEach((id) => depths.set(id, 0));
-
-  while (queue.length > 0) {
-    const id = queue.shift();
-    const nextDepth = (depths.get(id) || 0) + 1;
-    children.get(id)?.forEach((childId) => {
-      if (!depths.has(childId) || nextDepth > depths.get(childId)) {
-        depths.set(childId, nextDepth);
-        queue.push(childId);
-      }
-    });
-  }
-
-  ids.forEach((id) => {
-    if (!depths.has(id)) depths.set(id, 0);
-  });
-
-  return depths;
 };
 
 const positionNode = (cy, id, position, animate) => {
@@ -62,91 +32,111 @@ const positionNode = (cy, id, position, animate) => {
 
   if (animate) {
     node.stop();
-    node.animate({ position }, { duration: 450 });
+    node.animate({ position }, { duration: 400 });
   } else {
     node.position(position);
   }
 };
 
-const applyDenseGridLayout = (cy, orderedIds, container, animate) => {
+const applyCustomTreeLayout = (cy, nodes, primaryId, intermediateNodeIds, parentMap, container, animate) => {
   const { width, height, padding } = getGraphBounds(container);
   const usableWidth = Math.max(width - padding * 2, 1);
   const usableHeight = Math.max(height - padding * 2, 1);
-  const aspect = usableWidth / usableHeight;
-  const columns = Math.max(1, Math.ceil(Math.sqrt(orderedIds.length * aspect)));
-  const rows = Math.max(1, Math.ceil(orderedIds.length / columns));
 
-  orderedIds.forEach((id, index) => {
-    const row = Math.floor(index / columns);
-    const column = index % columns;
-    const x = padding + (usableWidth * (column + 1)) / (columns + 1);
-    const y = padding + (usableHeight * (row + 1)) / (rows + 1);
-    positionNode(cy, id, { x, y }, animate);
-  });
-};
-
-const shouldUseDenseGrid = (columns, usableWidth, usableHeight) => {
-  const minReadableXGap = 96;
-  const minReadableYGap = 86;
-  const maxRows = Math.max(...Array.from(columns.values(), (ids) => ids.length), 1);
-  const xGap = usableWidth / Math.max(columns.size - 1, 1);
-  const yGap = usableHeight / Math.max(maxRows + 1, 1);
-
-  return columns.size > 7 || xGap < minReadableXGap || yGap < minReadableYGap;
-};
-
-const applyDashboardLayout = (cy, nodes, edges, container, animate) => {
-  const { width, height, padding } = getGraphBounds(container);
-  const usableWidth = Math.max(width - padding * 2, 1);
-  const usableHeight = Math.max(height - padding * 2, 1);
-  const depths = getNodeDepths(nodes, edges);
-  const columns = new Map();
-
-  nodes.forEach((node) => {
-    const id = String(node.accountId || node.id || node.account_id);
-    const depth = depths.get(id) || 0;
-    if (!columns.has(depth)) columns.set(depth, []);
-    columns.get(depth).push(id);
-  });
-
-  const sortedDepths = Array.from(columns.keys()).sort((a, b) => a - b);
-  const orderedIds = sortedDepths.flatMap((depth) => columns.get(depth).sort());
-
-  if (shouldUseDenseGrid(columns, usableWidth, usableHeight)) {
-    applyDenseGridLayout(cy, orderedIds, container, animate);
-    return;
+  // Position Root Node (Level 0)
+  if (primaryId) {
+    const rootX = padding + usableWidth / 2;
+    const rootY = padding + 60;
+    positionNode(cy, primaryId, { x: rootX, y: rootY }, animate);
   }
 
-  const lastColumnIndex = Math.max(sortedDepths.length - 1, 1);
-
-  sortedDepths.forEach((depth, columnIndex) => {
-    const ids = columns.get(depth).sort();
-    ids.forEach((id, rowIndex) => {
-      const x = padding + (usableWidth * columnIndex) / lastColumnIndex;
-      const y = padding + (usableHeight * (rowIndex + 1)) / (ids.length + 1);
-      positionNode(cy, id, { x, y }, animate);
-    });
+  // Get intermediate nodes and leaf nodes
+  const intermediates = nodes.filter(n => {
+    const id = String(n.accountId || n.id || n.account_id);
+    return intermediateNodeIds.has(id);
   });
+
+  const leaves = nodes.filter(n => {
+    const id = String(n.accountId || n.id || n.account_id);
+    return id !== primaryId && !intermediateNodeIds.has(id);
+  });
+
+  // Group leaf node IDs by parent
+  const parentToLeaves = new Map();
+  intermediates.forEach(n => {
+    const id = String(n.accountId || n.id || n.account_id);
+    parentToLeaves.set(id, []);
+  });
+  parentToLeaves.set(primaryId, []);
+
+  leaves.forEach(leaf => {
+    const leafId = String(leaf.accountId || leaf.id || leaf.account_id);
+    const parentId = parentMap.get(leafId) || primaryId;
+    if (!parentToLeaves.has(parentId)) {
+      parentToLeaves.set(parentId, []);
+    }
+    parentToLeaves.get(parentId).push(leafId);
+  });
+
+  // Y levels
+  const level1Y = padding + usableHeight * 0.45;
+  const level2Y = padding + usableHeight * 0.95;
+
+  // Position intermediates (Level 1)
+  const N1 = intermediates.length;
+  intermediates.forEach((node, idx) => {
+    const id = String(node.accountId || node.id || node.account_id);
+    const parentX = padding + (usableWidth * (idx + 0.5)) / Math.max(1, N1);
+    positionNode(cy, id, { x: parentX, y: level1Y }, animate);
+
+    // Position its children leaf nodes centered under it
+    const children = parentToLeaves.get(id) || [];
+    const K = children.length;
+    if (K > 0) {
+      const subTreeWidth = (usableWidth / Math.max(1, N1)) * 0.85;
+      children.forEach((childId, cIdx) => {
+        const xOffset = K === 1 ? 0 : (subTreeWidth * (cIdx / (K - 1) - 0.5));
+        const childX = parentX + xOffset;
+        positionNode(cy, childId, { x: childX, y: level2Y }, animate);
+      });
+    }
+  });
+
+  // Position leaves directly under root (if any)
+  const rootLeaves = parentToLeaves.get(primaryId) || [];
+  const K_root = rootLeaves.length;
+  if (K_root > 0) {
+    const rootX = padding + usableWidth / 2;
+    const subTreeWidth = usableWidth * 0.8;
+    rootLeaves.forEach((childId, cIdx) => {
+      const xOffset = K_root === 1 ? 0 : (subTreeWidth * (cIdx / (K_root - 1) - 0.5));
+      const childX = rootX + xOffset;
+      positionNode(cy, childId, { x: childX, y: level1Y }, animate);
+    });
+  }
 };
 
-const layoutConfig = {
-  name: 'cose',
-  idealEdgeLength: 120,
-  nodeOverlap: 20,
-  refresh: 20,
-  fit: true,
-  padding: 50,
-  randomize: true,
-  componentSpacing: 100,
-  nodeRepulsion: 400000,
-  edgeElasticity: 100,
-  nestingFactor: 5,
-  gravity: 80,
-  numIter: 1000,
-  initialTemp: 200,
-  coolingFactor: 0.95,
-  minTemp: 1.0,
-  animate: true
+const formatINR = (val) => {
+  const num = Number(val || 0);
+  if (num === 0) return '';
+  return '₹' + new Intl.NumberFormat('en-IN').format(num);
+};
+
+const getDisplayLabel = (node, primaryId) => {
+  const id = String(node.accountId || node.id || node.account_id);
+  const name = node.label || id;
+  const isRoot = id === primaryId;
+  
+  const amount = isRoot 
+    ? (node.total_outflow || node.total_debits || 0)
+    : (node.total_inflow || node.total_outflow || 0);
+    
+  const formattedAmount = formatINR(amount);
+  
+  if (isRoot) {
+    return `${name}\n(Origin)\n${formattedAmount}`;
+  }
+  return `${name}\n${formattedAmount}`;
 };
 
 const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) => {
@@ -155,14 +145,85 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
   const isInitializedRef = useRef(false);
   const onNodeClickRef = useRef(onNodeClick);
 
+  // Tree and visibility state
+  const [collapsedNodes, setCollapsedNodes] = useState(new Set());
+  const parentMapRef = useRef(new Map());
+  const primaryIdRef = useRef('');
+  const intermediateNodeIdsRef = useRef(new Set());
+
   useEffect(() => {
     onNodeClickRef.current = onNodeClick;
   }, [onNodeClick]);
+
+  // Process nodes, identify primary and classify intermediate/leaves
+  useEffect(() => {
+    if (nodes.length === 0) return;
+
+    // Identify Primary Account (Root)
+    const primaryNode = nodes.find(n => n.node_type === 'account' && n.label?.includes('(Owner)'))
+                       || nodes.find(n => n.nodeType === 'account' && n.label?.includes('(Owner)'))
+                       || nodes.find(n => n.account_id && n.label?.includes('(Owner)'))
+                       || nodes[0];
+    const primaryId = primaryNode ? String(primaryNode.accountId || primaryNode.id || primaryNode.account_id) : '';
+    primaryIdRef.current = primaryId;
+
+    // Classify into Intermediate and Leaf
+    const intermediates = [];
+    const leaves = [];
+    nodes.forEach(n => {
+      const id = String(n.accountId || n.id || n.account_id);
+      if (id === primaryId) return;
+
+      const type = String(n.nodeType || n.node_type || '').toLowerCase();
+      const risk = Number(n.risk || 0);
+
+      // Leaves are merchants, upi_ids, ifsc, bank or low risk accounts
+      if (type === 'merchant' || type === 'upi_id' || type === 'ifsc' || type === 'bank' || risk < 40) {
+        leaves.push(n);
+      } else {
+        intermediates.push(n);
+      }
+    });
+
+    const intermediateIds = new Set(intermediates.map(n => String(n.accountId || n.id || n.account_id)));
+    intermediateNodeIdsRef.current = intermediateIds;
+
+    // Group leaf nodes under intermediate parent nodes
+    const parentMap = new Map();
+    if (intermediates.length > 0) {
+      leaves.forEach((leaf, idx) => {
+        const leafId = String(leaf.accountId || leaf.id || leaf.account_id);
+        const parent = intermediates[idx % intermediates.length];
+        const parentId = String(parent.accountId || parent.id || parent.account_id);
+        parentMap.set(leafId, parentId);
+      });
+    } else {
+      leaves.forEach(leaf => {
+        const leafId = String(leaf.accountId || leaf.id || leaf.account_id);
+        parentMap.set(leafId, primaryId);
+      });
+    }
+    parentMapRef.current = parentMap;
+
+    // Collapse all intermediates by default
+    setCollapsedNodes(new Set(intermediateIds));
+  }, [nodes]);
 
   useImperativeHandle(ref, () => ({
     highlightNode: (nodeId, duration = 1000) => {
       const cy = cyRef.current;
       if (!cy) return;
+      
+      // Auto-expand parent if collapsed
+      const parentId = parentMapRef.current.get(nodeId);
+      if (parentId && collapsedNodes.has(parentId)) {
+        setCollapsedNodes(prev => {
+          const next = new Set(prev);
+          next.delete(parentId);
+          return next;
+        });
+      }
+
       const node = cy.getElementById(nodeId);
       if (node.length > 0) {
         node.animate({
@@ -190,14 +251,32 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
       const root = cy.getElementById(nodeId);
       if (root.length === 0) return;
       
+      // Expand any collapsed nodes along the path
+      const nodesToExpand = new Set();
+      
       cy.elements().bfs({
         roots: root,
         visit: (v, e) => {
           v.addClass('highlighted');
           if (e) e.addClass('highlighted');
+          
+          const vId = v.id();
+          // If this is a child node, mark its parent for expansion
+          const parentId = parentMapRef.current.get(vId);
+          if (parentId && collapsedNodes.has(parentId)) {
+            nodesToExpand.add(parentId);
+          }
         },
         directed: true
       });
+
+      if (nodesToExpand.size > 0) {
+        setCollapsedNodes(prev => {
+          const next = new Set(prev);
+          nodesToExpand.forEach(id => next.delete(id));
+          return next;
+        });
+      }
     },
     expandNetwork: (nodeId) => {
       const cy = cyRef.current;
@@ -211,21 +290,60 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
       const neighbors1 = root.neighborhood();
       neighbors1.addClass('highlighted');
       
+      const nodesToExpand = new Set();
+      
       neighbors1.nodes().forEach(n => {
         n.neighborhood().addClass('highlighted');
+        
+        // Also check if any neighbor or neighbor's neighbor needs expansion
+        const nId = n.id();
+        const parentId = parentMapRef.current.get(nId);
+        if (parentId && collapsedNodes.has(parentId)) {
+          nodesToExpand.add(parentId);
+        }
       });
+
+      // Expand the root itself if it was collapsed
+      if (collapsedNodes.has(nodeId)) {
+        nodesToExpand.add(nodeId);
+      }
+
+      if (nodesToExpand.size > 0) {
+        setCollapsedNodes(prev => {
+          const next = new Set(prev);
+          nodesToExpand.forEach(id => next.delete(id));
+          return next;
+        });
+      }
     },
     highlightSuspicious: (riskThreshold = 60) => {
       const cy = cyRef.current;
       if (!cy) return;
       cy.elements().removeClass('suspicious-flag');
+      
+      const nodesToExpand = new Set();
+
       cy.nodes().forEach(n => {
         const risk = Number(n.data('risk') || 0);
         if (risk >= riskThreshold) {
           n.addClass('suspicious-flag');
           n.connectedEdges().addClass('suspicious-flag');
+
+          const nId = n.id();
+          const parentId = parentMapRef.current.get(nId);
+          if (parentId && collapsedNodes.has(parentId)) {
+            nodesToExpand.add(parentId);
+          }
         }
       });
+
+      if (nodesToExpand.size > 0) {
+        setCollapsedNodes(prev => {
+          const next = new Set(prev);
+          nodesToExpand.forEach(id => next.delete(id));
+          return next;
+        });
+      }
     },
     clearHighlights: () => {
       const cy = cyRef.current;
@@ -234,7 +352,7 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
     }
   }));
 
-  // 1. Cytoscape setup
+  // 2. Cytoscape instance setup
   useEffect(() => {
     if (!containerRef.current || isInitializedRef.current) return;
 
@@ -242,7 +360,6 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
       container: containerRef.current,
       elements: [],
       style: graphStyles,
-      layout: layoutConfig,
       userZoomingEnabled: true,
       userPanningEnabled: true,
       boxSelectionEnabled: false
@@ -253,6 +370,21 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
     
     cy.on('tap', 'node', (evt) => {
       const node = evt.target;
+      const nodeId = node.id();
+
+      // If user clicked an intermediate node, toggle its collapse state
+      if (intermediateNodeIdsRef.current.has(nodeId)) {
+        setCollapsedNodes(prev => {
+          const next = new Set(prev);
+          if (next.has(nodeId)) {
+            next.delete(nodeId);
+          } else {
+            next.add(nodeId);
+          }
+          return next;
+        });
+      }
+      
       onNodeClickRef.current?.({ 
         id: node.id(), 
         accountId: node.data('account_id') || node.id(),
@@ -294,28 +426,31 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
     const observer = new ResizeObserver(() => {
       cy.resize();
       if (nodes.length > 0) {
-        cy.fit(cy.elements(), getGraphBounds(container).padding);
+        cy.fit(cy.elements(':visible'), getGraphBounds(container).padding);
       }
     });
 
     observer.observe(container);
     return () => observer.disconnect();
-  }, [nodes, edges]);
+  }, [nodes]);
 
-  // 2. Data sync
+  // 3. Sync nodes, edges and run custom tree layout
   useEffect(() => {
     const cy = cyRef.current;
-    if (!cy || !isInitializedRef.current) return;
+    const container = containerRef.current;
+    if (!cy || !isInitializedRef.current || nodes.length === 0) return;
 
     cy.batch(() => {
-      const role = getRole();
       const currentIds = new Set();
+      const primaryId = primaryIdRef.current;
+      const parentMap = parentMapRef.current;
 
-      // Update or Add Nodes
+      // Add/Update Nodes
       nodes.forEach((item) => {
         const nodeId = String(item.accountId || item.id || item.account_id);
         currentIds.add(nodeId);
-        const displayLabel = nodeId;
+        
+        const displayLabel = getDisplayLabel(item, primaryId);
         
         const existing = cy.getElementById(nodeId);
         if (existing.length > 0) {
@@ -325,41 +460,114 @@ const GraphCanvas = forwardRef(({ nodes = [], edges = [], onNodeClick }, ref) =>
         }
       });
 
-      // Update or Add Edges
+      // Add/Update Edges
       edges.forEach((edge) => {
         const edgeId = String(edge.id || edge.tx_id || `${edge.source || edge.from}-${edge.target || edge.to}`);
         currentIds.add(edgeId);
+
+        const src = String(edge.source || edge.from);
+        const tgt = String(edge.target || edge.to);
+
+        // Redirect edge to Intermediate node if target is a Leaf
+        let newSrc = src;
+        let newTgt = tgt;
         
+        if (!isSelfTransfer(edge)) {
+          if (src === primaryId && parentMap.has(tgt)) {
+            newSrc = parentMap.get(tgt);
+          } else if (tgt === primaryId && parentMap.has(src)) {
+            newTgt = parentMap.get(src);
+          }
+        }
+
         const edgeData = {
           ...edge,
-          source: edge.source || edge.from,
-          target: edge.target || edge.to
+          source: newSrc,
+          target: newTgt,
+          from: newSrc,
+          to: newTgt
         };
         
+        const label = formatTransactionLabel(edgeData);
+        const classes = isSelfTransfer(edgeData) ? 'self-transfer' : '';
+
         const existing = cy.getElementById(edgeId);
         if (existing.length > 0) {
-          existing.data({ ...edgeData, label: edgeData.label || formatTransactionLabel(edgeData) });
+          existing.data({ ...edgeData, label });
+          existing.classes(classes);
         } else {
-          cy.add({ data: {
-            ...edgeData,
-            id: edgeId,
-            label: edgeData.label || formatTransactionLabel(edgeData)
-          } });
+          cy.add({ 
+            data: {
+              ...edgeData,
+              id: edgeId,
+              label
+            },
+            classes
+          });
         }
       });
 
-      // Remove Stale Elements
+      // Remove stale elements
       cy.elements().forEach((ele) => {
         if (!currentIds.has(ele.id())) {
           ele.remove();
         }
       });
+
+      // Apply our beautiful custom top-down layout
+      applyCustomTreeLayout(
+        cy,
+        nodes,
+        primaryId,
+        intermediateNodeIdsRef.current,
+        parentMap,
+        container,
+        false // Run layout synchronously first
+      );
+    });
+  }, [nodes, edges]);
+
+  // 4. Update element visibility based on expanded/collapsed state
+  useEffect(() => {
+    const cy = cyRef.current;
+    const container = containerRef.current;
+    if (!cy || !isInitializedRef.current) return;
+
+    cy.batch(() => {
+      // Show everything first
+      cy.elements().style('display', 'element');
+
+      // Hide leaves whose parents are collapsed
+      collapsedNodes.forEach(parentId => {
+        const childrenIds = [];
+        parentMapRef.current.forEach((pId, childId) => {
+          if (pId === parentId) {
+            childrenIds.push(childId);
+          }
+        });
+
+        childrenIds.forEach(childId => {
+          const childNode = cy.getElementById(childId);
+          if (childNode.length > 0) {
+            childNode.style('display', 'none');
+            // Hide connected edges
+            childNode.connectedEdges().style('display', 'none');
+          }
+        });
+      });
     });
 
-    if (nodes.length > 0) {
-      cy.layout(layoutConfig).run();
-    }
-  }, [nodes, edges]);
+    // Fit visible elements
+    setTimeout(() => {
+      cy.animate({
+        fit: {
+          eles: cy.elements(':visible'),
+          padding: getGraphBounds(container).padding
+        }
+      }, { duration: 400 });
+    }, 50);
+
+  }, [collapsedNodes]);
 
   return (
     <div
